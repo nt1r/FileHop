@@ -1,0 +1,38 @@
+name: PR policy
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+    branches: [main, dev]
+
+permissions:
+  contents: read
+
+jobs:
+  main-source-policy:
+    name: main-source-policy
+    runs-on: ubuntu-latest
+    steps:
+      # Read trusted event metadata only. Never check out or execute PR code here.
+      - name: Check pull request branch policy
+        env:
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          with open(os.environ['GITHUB_EVENT_PATH'], encoding='utf-8') as stream:
+              pr = json.load(stream)['pull_request']
+          base = pr['base']['ref']
+          head = pr['head']
+          source_repo = (head.get('repo') or {}).get('full_name')
+          if base == 'main' and (
+              head['ref'] != 'dev'
+              or source_repo != os.environ['EXPECTED_REPOSITORY']
+          ):
+              print('::error::Only dev from this repository may merge into main.')
+              sys.exit(1)
+          print('Pull request branch policy passed.')
+          PY
