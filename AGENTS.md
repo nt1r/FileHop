@@ -10,6 +10,23 @@ FileHop is a lightweight, self-hosted text and file exchange tool for desktop We
 - For changes spanning authentication, file lifecycle, client behavior, or deployment, read the affected Specs and their cross-references. Read unrelated Specs only when needed.
 - Before creating or updating a PR description, read [.github/pull_request_template.md](.github/pull_request_template.md) and follow its structure.
 
+## Agent skills
+
+### Issue tracker
+
+Track tasks and bugs in GitHub Issues; repository Specs remain authoritative.
+Before issue operations, read [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md).
+
+### Triage labels
+
+Use the five canonical triage labels.
+Before classifying or labeling issues, read [docs/agents/triage-labels.md](docs/agents/triage-labels.md).
+
+### Domain docs
+
+Use the single-context layout: root CONTEXT.md and optional docs/adr/.
+Before domain exploration or decision changes, read [docs/agents/domain.md](docs/agents/domain.md).
+
 ## Sources of Truth
 
 - `CONTEXT.md` defines domain terms, not implementation details.
