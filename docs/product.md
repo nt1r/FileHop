@@ -148,7 +148,7 @@ FileHop 是轻量、自托管、面向个人的跨设备文本与文件交换工
 - 正式域名：`https://transfer.hammerbilly.top`。
 - 公网 Web 入站通过 Oracle Cloud 网络规则仅开放 TCP 443，不开放 80，不要求修改宿主防火墙或既有 SSH 管理入口；仍须验证端口映射与实际网络可达性。
 - 开发和生产同 VPS、独立应用栈及数据，共享独立 Caddy 入口。所有 CI 检查和发布构建使用 GitHub 托管 runner，不使用 VPS self-hosted runner。
-- 仓库决定公开；个人分支经 PR 进入受保护的 dev，仅本仓库 dev 可经 PR 合并至受保护的 main。版本 tag 触发产物构建并保存至 GHCR；生产由操作者在 VPS 手动执行脚本部署，Actions 不主动连接 VPS。
+- 仓库决定公开；默认分支为受保护的 dev，个人分支经 PR 进入 dev，仅本仓库 dev 可经 PR 合并至受保护的发布分支 main。版本 tag 触发产物构建并保存至 GHCR；生产由操作者在 VPS 手动执行脚本部署，Actions 不主动连接 VPS。
 - 允许短暂维护窗口；部署失败人工处理，不承诺自动回滚。仓库公开前须检查完整历史中的敏感信息并落实 Apache License 2.0（Apache-2.0）许可；GHCR 后端镜像与前端静态制品决定公开，运行密钥与用户数据不得进入发布产物。
 - Web、`/api/*` 和 `/api/files/*` 同域访问。
 - Caddy 提供 React 构建产物，并通过内部网络反向代理到 `backend:8080`。

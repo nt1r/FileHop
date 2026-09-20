@@ -1,6 +1,6 @@
 # Contributing
 
-- Start a working branch from `dev` and open its pull request against `dev`.
+- `dev` is the repository's default branch. Start a working branch from `dev` and open its pull request against `dev`; verify the base before submitting.
 - Open release pull requests from this repository's `dev` branch into `main`.
 - Direct pushes, force pushes, and deletion of `main` or `dev` are blocked.
 - Both branches require the `main-source-policy` check and resolved review conversations. No approving review is required while this is a solo project.
