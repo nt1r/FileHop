@@ -1,0 +1,52 @@
+name: filehop-dev
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/backend.Dockerfile
+    init: true
+    volumes:
+      - type: bind
+        source: ../data-dev/database
+        target: /data/database
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../data-dev/files
+        target: /data/files
+        bind:
+          create_host_path: false
+    networks:
+      ingress:
+        aliases: [filehop-dev-backend]
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/web.Dockerfile
+    init: true
+    environment:
+      FILEHOP_DEV_HOST: ${FILEHOP_DEV_HOST:?Set the exact development hostname}
+    volumes:
+      - ../web/src:/app/src:ro
+      - ../web/index.html:/app/index.html:ro
+      - ../web/vite.config.ts:/app/vite.config.ts:ro
+    networks:
+      ingress:
+        aliases: [filehop-dev-web]
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+networks:
+  ingress:
+    external: true
+    name: ${FILEHOP_DEV_NETWORK:?Set the dedicated development ingress network}

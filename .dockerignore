@@ -1,0 +1,16 @@
+.git
+**/node_modules
+**/dist
+**/target
+.env
+.env.*
+secrets
+data-dev
+data-test
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.local.caddy
+**/test-results
+**/playwright-report
+**/__pycache__

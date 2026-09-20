@@ -8,4 +8,4 @@
 - PRs into `main` allow only **Create a merge commit** for `dev` → `main`; preserve the ancestry of these long-lived branches. Bring `main` back into a working branch when necessary to satisfy up-to-date checks.
 - The PR template lives in [`.github/pull_request_template.md`](.github/pull_request_template.md). Follow [the quality principles](docs/testing.md) and the relevant [Spec](docs/roadmap.md).
 
-The current workflow checks PR branch policy only. Application build, test, and release workflows are not implemented yet. Creating branches or merging a PR does not deploy the application.
+Workflows check PR branch policy and the initialization slice's application builds, static checks, real-storage tests, browser smoke, and isolated container smoke on GitHub-hosted runners. Release workflows are not implemented yet. Creating branches or merging a PR does not deploy the application.
