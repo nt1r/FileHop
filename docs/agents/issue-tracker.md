@@ -63,6 +63,39 @@ ticket", read the issue, labels, and comments.
 GitHub issues and PRs share a number space. Resolve whether a reference
 is an issue or PR before acting; use `gh pr view` and `gh pr diff` for PRs.
 
+## Linking Pull Requests to Issues
+
+When creating or updating a PR description, follow
+[the PR template](../../.github/pull_request_template.md), including its
+closing-keyword rules. Read each target issue's current body and comments
+before deciding whether it should close with this PR. Use `Closes` when the
+PR fully resolves the issue or there is a justified basis for closing it;
+explain that basis if it is not full implementation of the requested work.
+Use `Refs` for partial work or related context when the issue should remain
+open after merge.
+
+If implementation is complete and only simple manual acceptance checks remain,
+`Closes` is still appropriate. In the PR's Evidence section, list the pending
+checks, actionable steps, expected results, and relevant acceptance identifiers.
+Explicitly notify the user of what they need to verify and make merge conditional
+on their confirmation that all acceptance criteria are met. Keep pending checks
+clearly distinct from passed checks; a closing keyword is closure intent, not
+proof of verification. Known defects, missing implementation, or substantial
+unverified risks do not qualify for this manual-check exception.
+
+Before submitting the PR, check that every issue intended for closure has a
+visible closing reference and that any pending manual checks have been handed
+off to the user. GitHub does not evaluate the checklist: merging into the default
+branch triggers closure even if those checks are still pending. If verification
+fails, keep the PR unmerged until resolved, or change the reference to `Refs`
+and explicitly leave the remaining scope open.
+
+For cross-repository issues, use `Closes owner/repo#123`. If the PR targets a
+non-default branch, carry the closing references into the eventual PR to the
+default branch; do not report the issues as automatically closed by the
+intermediate merge. Leave issues open until merge rather than manually
+closing them when submitting the PR.
+
 ## Pull Requests as a Triage Surface
 
 **PRs as a request surface: no.**
