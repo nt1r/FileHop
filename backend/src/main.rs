@@ -21,6 +21,7 @@ enum Command {
         #[arg(long, required = true)]
         confirm_paths: bool,
     },
+    ResetPassword,
     Serve {
         #[arg(long, default_value = "0.0.0.0:8080")]
         listen: SocketAddr,
@@ -52,6 +53,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             backend::storage::initialize(&cli.database_dir, &cli.files_dir, &username, &password)
                 .await?;
             println!("Initialization completed.");
+        }
+        Command::ResetPassword => {
+            eprintln!(
+                "Database directory: {}\nFiles directory: {}",
+                cli.database_dir.display(),
+                cli.files_dir.display()
+            );
+            let password = rpassword::prompt_password("Password: ")?;
+            backend::storage::reset_password(&cli.database_dir, &cli.files_dir, &password).await?;
+            println!("Password reset completed; all sessions revoked.");
         }
         Command::Serve {
             listen,
