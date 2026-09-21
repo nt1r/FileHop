@@ -35,8 +35,8 @@ jobs:
           cargo clippy --manifest-path backend/Cargo.toml --locked --all-targets -- -D warnings
           cargo test --manifest-path backend/Cargo.toml --locked
           cargo build --manifest-path backend/Cargo.toml --locked
-      - name: Real storage and terminal integration
-        run: python3 -m unittest discover -s tests -v
+      - name: Shell syntax
+        run: bash -n tests/browser.sh tests/compose_smoke.sh tests/web_container_smoke.sh
       - name: Web checks
         run: |
           npm --prefix web ci
@@ -45,12 +45,12 @@ jobs:
           cd web
           npx playwright install --with-deps chromium
       - name: Browser initialization loop
-        run: python3 tests/browser.py
+        run: bash tests/browser.sh
       - name: Compose configuration
         run: docker compose --env-file .env.example -f deploy/compose.dev.yml config --quiet
       - name: Container builds
         run: |
           docker build -f deploy/backend.Dockerfile -t filehop-issue6-backend .
           docker build -f deploy/web.Dockerfile -t filehop-issue6-web .
-          python3 tests/compose_smoke.py
-          python3 tests/web_container_smoke.py
+          bash tests/compose_smoke.sh
+          bash tests/web_container_smoke.sh

@@ -9,7 +9,9 @@
 - 页面：构建后静态页面 + 真实后端，Playwright Chromium；只在回环随机端口运行。
 - 容器：一次性 Compose 项目、无网络/无发布端口、临时挂载；容器内初始化和重建后通过状态 interface 验证挂载数据。
 
-## 已执行
+## 初始实现验证（历史记录）
+
+下表记录最初 Python 测试实现的执行证据，不是当前运行命令；当前已迁移至 Rust / Playwright / Bash，命令见开发指南。
 
 环境：Linux ARM64，Rust 1.98.1、Node 24.21.0、npm 11.19.0、Docker Compose v5.5.1；Playwright Chromium 153.0.8010.12。
 
@@ -31,6 +33,16 @@
 CLI/HTTP 测试覆盖：全新启动不写数据、显式初始化/重启、运行时刷新、凭证格式及 Unicode 长度、隐藏输入、强制目标确认、拒绝密码参数、重复初始化不覆盖、未知残留、数据库缺失、身份缺失/不匹配、不可写目录/数据库、符号链接数据库、并发初始化、实际受限文件写入引发的部分失败保留，以及业务写入口未开放。
 
 TDD 红绿记录：未初始化状态、显式初始化命令、运行中状态刷新、存储不可写检查、页面闭环均先观察失败，再实现通过；其余用例用于扩充回归。
+
+## 无 Python 测试迁移
+
+- 后端原有 16 项 CLI/存储行为迁入 `backend/tests/initialization.rs`：常规状态通过进程内 HTTP interface，两个权限场景合为一个用例，共 15 个行为测试。公开命令仍以真实 PTY 验证；条件等待终端关闭 ECHO 后才输入，避免提示符与关闭回显之间的竞态。
+- `initialize_external_fixture` 是明确忽略的辅助入口，不是未完成用例；浏览器和容器编排显式执行它，调用实际管理命令，不增加产品调试入口。
+- `tests/browser.sh` 与小型 Node HTTP fixture 连接真实后端，Playwright 验证页面；`tests/compose_smoke.sh` 保留容器内初始化、重建和两次后端重启后的状态验证。
+- `tests/web_container_smoke.sh` 保留递归环境文件排除及非 root、只读挂载下的 Vite 启动/源码转换验证。
+- 新路径本地验证通过：Rust fmt/Clippy、15 项初始化行为与 1 项存活测试、显式 fixture 执行、npm ci/lint/build、Playwright 闭环、两个容器构建及两类 Bash 容器冒烟。Shell 使用 `bash -n` 验证，当前环境没有 ShellCheck，未声称执行该检查。
+- Python 测试脚本全部删除，应用 CI 与开发命令同步替换；仓库原有 PR 分支策略 workflow 的 Python 不属于应用测试，本次未改动其受信任策略逻辑。
+- 不按测试数量机械复制，不扩建通用测试平台。仅新增测试专用 PTY 依赖，应用运行代码未变。
 
 ## 两轴自行审阅
 

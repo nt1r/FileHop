@@ -17,7 +17,7 @@
 
 ## 工具链与本地检查
 
-测试工具目标已统一为 Rust / Playwright / Bash，见[测试规范](testing.md)。当前下列命令仍包含历史 Python 实现，尚待按行为覆盖等价迁移；保留这些真实可执行的命令不代表允许继续新增 Python 测试，也不代表替换已经完成。
+测试使用 Rust / Playwright / Bash，见[测试规范](testing.md)，不需要 Python。Bash 在 Linux 宿主机或 CI runner 上编排，需具备 Node、Cargo、Docker、curl 及标准 GNU 工具；不要求应用镜像提供这些宿主工具。
 
 - Node `24.21.0`（`.nvmrc`），npm `11.19.0`。
 - Rust `1.98.1`，rustfmt / Clippy（`rust-toolchain.toml`）；安装后确认 `cargo`、`rustc` 可在开发终端调用。
@@ -34,22 +34,21 @@ cargo fmt --manifest-path backend/Cargo.toml --check
 cargo clippy --manifest-path backend/Cargo.toml --locked --all-targets -- -D warnings
 cargo test --manifest-path backend/Cargo.toml --locked
 cargo build --manifest-path backend/Cargo.toml --locked
-python3 -m unittest discover -s tests -v
 (cd web && npx playwright install chromium)
-python3 tests/browser.py
+bash tests/browser.sh
 # 仅验证示例配置；不创建网络、容器或数据目录。
 docker compose --env-file .env.example -f deploy/compose.dev.yml config --quiet
 ```
 
-测试通过公开 CLI（伪终端隐藏输入）、状态 HTTP interface 和浏览器页面验证 S001-A01。使用 Python 标准库临时目录、真实 SQLite 和回环随机端口；无需真实账户或开发域名，不以假数据库证明一致性。测试仅支持 Linux，权限用例须以非 root 用户运行。浏览器使用 Playwright Chromium，不代替正式稳定版 Chrome/HTTPS 验收。
+测试通过公开 CLI（伪终端隐藏输入）、状态 HTTP interface 和浏览器页面验证 S001-A01。使用 Rust tempfile / Bash mktemp 临时目录、真实 SQLite 和回环随机端口；无需真实账户或开发域名，不以假数据库证明一致性。测试仅支持 Linux，权限用例须以非 root 用户运行。浏览器使用 Playwright Chromium，不代替正式稳定版 Chrome/HTTPS 验收。
 
 可选的隔离容器检查（不发布端口、不加入共享网络）：
 
 ```bash
 docker build -f deploy/backend.Dockerfile -t filehop-issue6-backend .
 docker build -f deploy/web.Dockerfile -t filehop-issue6-web .
-python3 tests/compose_smoke.py
-python3 tests/web_container_smoke.py
+bash tests/compose_smoke.sh
+bash tests/web_container_smoke.sh
 ```
 
 前端冒烟验证根目录及嵌套 `.env*` 文件不进入构建上下文，并以非 root 用户、实际开发只读挂载启动 Vite，检查 HTML 与源码转换响应；不发布端口。

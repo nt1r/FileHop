@@ -1,6 +1,6 @@
 import { defineConfig } from '@playwright/test'
 
-if (!process.env.TEST_BASE_URL) throw new Error('Run python3 tests/browser.py with isolated storage')
+if (!process.env.TEST_BASE_URL) throw new Error('Run bash tests/browser.sh with isolated storage')
 
 export default defineConfig({
   testDir: './tests',
