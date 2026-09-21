@@ -1,0 +1,22 @@
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+/secrets/
+/deploy/*.local.caddy
+
+# Persistent and temporary application data
+/data-dev/
+/data-test/
+*.db
+*.db-shm
+*.db-wal
+
+# Build output
+**/node_modules/
+**/dist/
+**/target/
+*.tsbuildinfo
+**/test-results/
+**/playwright-report/
+**/__pycache__/

@@ -1,6 +1,6 @@
 # Spec 001：桌面文本闭环
 
-状态：已确认，待实现。本文为桌面文本闭环的权威需求、技术契约与验收依据；确认不代表已经实现。
+状态：已确认，实施中。#6 隔离启动与显式初始化已建立，其他业务能力及阶段验收仍待完成。本文为桌面文本闭环的权威需求、技术契约与验收依据；确认不代表已经实现。
 
 权威来源：本文件是该切片的唯一 Spec；[实施主 Issue #4](https://github.com/nt1r/FileHop/issues/4) 跟踪实施与验收，不复制或替代本文件。如迁移到 Issue，应明确迁移后的权威来源，不双份维护。
 
@@ -205,6 +205,7 @@
 | `GET /api/messages` | 最近页、before 历史分页或 after 增量分页 |
 | `GET /api/sends/{send_id}` | 查询已成功的发送结果，不把“未找到”当成取消证明 |
 
+- `GET /api/status` 返回 `{ "state": "uninitialized" | "initialized" | "storage_error" }`，使用 `Cache-Control: no-store`；仅诊断初始化状态，不表示登录或全部业务就绪。存储缺失、不匹配、部分初始化或不可访问统一报告 `storage_error`，不返回路径、用户名或凭证；空且合法的一致目录为 `uninitialized`。页面提供手动刷新，不提供远程注册或初始化。
 - 发送请求包含 `send_id`（客户端随机 UUID）、`text`、`source_label`。消息响应包含 `id`、`send_id`、`text`、`source_label`、`created_at`；时间用 UTC RFC 3339，消息 ID 在 JSON 中用十进制字符串，避免 JavaScript 整数精度问题。
 - 列表支持 `limit`（默认 50，范围 1–100）、互斥的 `before` 或 `after`（排他边界）。消息返回顺序统一为 ID 升序。
 - 首次及 before 查询选取边界前最近一页，返回 `has_older` 和最小 ID 作为继续向前的游标；after 查询选取边界后最早一页，返回 `has_more` 和本页最大 ID 作为继续向后的游标。

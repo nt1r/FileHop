@@ -1,0 +1,33 @@
+# Site fragment only: review and integrate into the existing shared Caddy.
+# Variables must be configured in Caddy's environment, not just app Compose.
+# Do NOT commit the real Basic Auth hash or credentials.
+https://{$FILEHOP_DEV_HOST} {
+	tls {
+		issuer acme {
+			disable_http_challenge
+		}
+	}
+
+	route {
+		basic_auth {
+			{$FILEHOP_DEV_USER} {$FILEHOP_DEV_PASSWORD_HASH}
+		}
+		# The development gate is not application authentication.
+		request_header -Authorization
+		handle /api/* {
+			reverse_proxy filehop-dev-backend:8080
+		}
+		# Never expose internal liveness or future diagnostic routes.
+		handle /internal/* {
+			respond 404
+		}
+		handle {
+			reverse_proxy filehop-dev-web:5173
+		}
+	}
+
+	handle_errors {
+		header X-FileHop-Access-Layer development
+		respond "Development access layer error" {err.status_code}
+	}
+}
