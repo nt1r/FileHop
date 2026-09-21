@@ -128,6 +128,35 @@ pub async fn initialize(
     result.map_err(|_| "initialization partially completed; preserve both directories and inspect them manually; no automatic cleanup performed".into())
 }
 
+pub async fn reset_password(database: &Path, files: &Path, password: &str) -> Result<()> {
+    if !(12..=128).contains(&password.chars().count()) {
+        return Err("password must contain 12-128 Unicode code points".into());
+    }
+    if !matches!(inspect(database, files).await, Status::Initialized) {
+        return Err("storage unavailable; password unchanged".into());
+    }
+    let hash = Argon2::default()
+        .hash_password(password.as_bytes())
+        .map_err(|_| "password hashing failed")?
+        .to_string();
+    let mut connection = SqliteConnection::connect_with(&options(&database.join(DATABASE))).await?;
+    // 密码替换与全部凭证撤销必须一起提交；失败时旧密码和旧会话一起保留，
+    // 不触碰业务记录、发送标识或服务器文件，也不运行初始化或迁移。
+    let mut transaction = connection.begin().await?;
+    let updated = sqlx::query("UPDATE account SET password_hash = ? WHERE singleton = 1")
+        .bind(hash)
+        .execute(&mut *transaction)
+        .await?;
+    if updated.rows_affected() != 1 {
+        return Err("account unavailable".into());
+    }
+    sqlx::query("DELETE FROM session")
+        .execute(&mut *transaction)
+        .await?;
+    transaction.commit().await?;
+    Ok(())
+}
+
 pub async fn inspect(database: &Path, files: &Path) -> Status {
     match inspect_inner(database, files).await {
         Ok(state) => state,

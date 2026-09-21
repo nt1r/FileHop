@@ -63,6 +63,121 @@ impl Fixture {
 }
 
 #[tokio::test]
+async fn logout_is_idempotent_origin_protected_and_only_revokes_current_session() {
+    let f = Fixture::new().await;
+    let first = f.login("Admin", " synthetic password ").await;
+    let second = f.login("Admin", " synthetic password ").await;
+    let cookie = |response: &axum::response::Response| {
+        response.headers()["set-cookie"]
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .to_owned()
+    };
+    let first = cookie(&first);
+    let second = cookie(&second);
+    for origin in [None, Some("null"), Some("https://evil.invalid")] {
+        let mut request = Request::builder()
+            .method("DELETE")
+            .uri("/api/session")
+            .header("cookie", &first);
+        if let Some(origin) = origin {
+            request = request.header("origin", origin);
+        }
+        let response = f
+            .app
+            .clone()
+            .oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert!(response.headers().get("set-cookie").is_none());
+    }
+    for token in [
+        Some(first.as_str()),
+        Some(first.as_str()),
+        Some("__Host-filehop=invalid"),
+        None,
+    ] {
+        let mut request = Request::builder()
+            .method("DELETE")
+            .uri("/api/session")
+            .header("origin", "https://filehop.invalid");
+        if let Some(token) = token {
+            request = request.header("cookie", token);
+        }
+        let response = f
+            .app
+            .clone()
+            .oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        assert!(
+            response.headers()["set-cookie"]
+                .to_str()
+                .unwrap()
+                .contains("Max-Age=0")
+        );
+    }
+    for (token, expected) in [(first, StatusCode::UNAUTHORIZED), (second, StatusCode::OK)] {
+        let response = f
+            .app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/session")
+                    .header("cookie", token)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected);
+    }
+}
+
+#[tokio::test]
+async fn expired_logout_clears_cookie_but_storage_failure_does_not_claim_revocation() {
+    let f = Fixture::new().await;
+    let response = f.login("Admin", " synthetic password ").await;
+    let cookie = response.headers()["set-cookie"]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    f.clock.fetch_add(43_200, Ordering::SeqCst);
+    let logout = || {
+        f.app.clone().oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/api/session")
+                .header("origin", "https://filehop.invalid")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+    };
+    let response = logout().await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        response.headers()["set-cookie"]
+            .to_str()
+            .unwrap()
+            .contains("Max-Age=0")
+    );
+    std::fs::write(f._root.path().join("files/storage-id"), "mismatched").unwrap();
+    let response = logout().await.unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(response.headers().get("set-cookie").is_none());
+}
+
+#[tokio::test]
 async fn only_exact_controlled_proxy_can_supply_a_single_client_address() {
     let f = Fixture::with_proxy(Some("192.0.2.1".parse().unwrap())).await;
     for (peer, source, expected) in [

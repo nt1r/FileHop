@@ -6,14 +6,14 @@
 
 ## 当前实现状态
 
-当前开发切片支持隔离启动、显式初始化及安全登录恢复：
+当前开发切片支持隔离启动、显式初始化、安全登录恢复、退出及管理员撤销登录：
 
-- `web/`：Vite + React + TypeScript + Kumo standalone 样式，初始化状态页面、安全登录、受保护的空消息页及同页重新登录。
-- `backend/`：Axum + Tokio + SQLx SQLite；显式 `init` 管理命令、存储标识与账户迁移、`GET /api/status`、`POST /api/session`、`GET /api/session`。
+- `web/`：Vite + React + TypeScript + Kumo standalone 样式，初始化状态页面、安全登录、受保护的空消息页、同页重新登录及同源标签页退出通知。
+- `backend/`：Axum + Tokio + SQLx SQLite；显式 `init` / `reset-password` 管理命令、存储标识与账户迁移、`GET /api/status`、`POST /api/session`、`GET /api/session`、`DELETE /api/session`。
 - `deploy/`：开发应用 Compose、容器构建文件及共享 Caddy 站点示例。
 - `GET /internal/live` 仅返回 204，表示进程可响应；**不是数据库可用或业务就绪检查**。不通过公网入口开放。
 
-状态查询仅返回 `uninitialized`、`initialized` 或 `storage_error`，禁止缓存且不泄露目录、账户或凭证。未初始化与存储异常不开放业务写入。主动退出/密码重置（#8）、消息、文件、Android 及正式发布尚未实现；初始化成功不代表整个 Spec 001 已完成。GitHub 托管 CI 定义见 `.github/workflows/check.yml`，实际执行结果以对应提交的 Actions 检查为准。
+状态查询仅返回 `uninitialized`、`initialized` 或 `storage_error`，禁止缓存且不泄露目录、账户或凭证。未初始化与存储异常不开放业务写入。消息、文件、Android 及正式发布尚未实现；初始化成功不代表整个 Spec 001 已完成。GitHub 托管 CI 定义见 `.github/workflows/check.yml`，实际执行结果以对应提交的 Actions 检查为准。
 
 ## 工具链与本地检查
 
@@ -107,7 +107,7 @@ docker compose --env-file .env -f deploy/compose.dev.yml exec backend \
 
 数据库位于 `database/transfer.db`；两个根目录各有 `storage-id`，数据库也保存同一标识。使用 SQLite WAL + synchronous=FULL、事务、版本迁移与 Argon2id 随机盐哈希。初始化以目录排他锁协调并发，拒绝非空目录、重复/部分初始化及嵌套目录。普通检查不建库、不执行迁移；标识缺失、不匹配、数据库丢失或访问失败返回存储异常。
 
-跨目录操作不是原子的。发生部分失败时保留残留并报告部分完成，**不要删除、覆盖或盲目重试**；先停止相关操作并人工核对两个目标目录。没有自动恢复、清库或密码重置入口（重置属于 #8）。目前状态检查是诊断，不代替后续业务写入在使用存储时的验证。
+跨目录操作不是原子的。发生部分失败时保留残留并报告部分完成，**不要删除、覆盖或盲目重试**；先停止相关操作并人工核对两个目标目录。没有自动恢复或清库入口；密码重置只接受已初始化且存储标识一致的实例。目前状态检查是诊断，不代替后续业务写入在使用存储时的验证。
 
 ### 登录与会话（#7）
 
@@ -125,7 +125,24 @@ cargo test --release --manifest-path backend/Cargo.toml --test session_process m
 
 本轮整理尚未进入 main 的 `0001_next_release.sql`，加入会话存储。旧开发实例不会自动迁移；当前无升级命令，已有需保留的数据不得通过重新 init 处理。可丢弃开发实例也须由操作者明确授权并核对两个目录后再重建，本任务未清理任何既有实例。
 
-验收映射：`backend/tests/session.rs` 覆盖固定时间、Origin/格式、节流/过载和凭证磁盘保护；`session_process.rs` 使用 SIGKILL 后重启验证有效会话保留（S001-A15 会话部分）；Playwright 连接真实后端验证 Cookie、刷新恢复、外层 401、到期隐藏、迟到读取和登录响应丢失（S001-A08/A14 的当前切片）。尚无文本草稿/消息接口，其相关验收留待文本票；退出及撤销属于 #8。回环 localhost 的 Chromium 安全上下文不等于真实 HTTPS、稳定版 Chrome 或 Caddy 信任链验收，后者由 #13 完成。
+验收映射：`backend/tests/session.rs` 覆盖固定时间、Origin/格式、节流/过载和凭证磁盘保护；`session_process.rs` 使用 SIGKILL 后重启验证有效会话保留（S001-A15 会话部分）；Playwright 连接真实后端验证 Cookie、刷新恢复、外层 401、到期隐藏、迟到读取和登录响应丢失（S001-A08/A14 的当前切片）。尚无文本草稿/消息接口，其相关验收留待文本票；退出及撤销验证见下节。回环 localhost 的 Chromium 安全上下文不等于真实 HTTPS、稳定版 Chrome 或 Caddy 信任链验收，后者由 #13 完成。
+
+### 退出与管理员撤销登录（#8）
+
+`DELETE /api/session` 无请求体，仍严格检查精确 Origin，拒绝应用 Authorization。成功返回 `{ "state": "logged_out" }` 并清除安全 Cookie；重复退出、已到期或缺失凭证同样完成，仅删除当前请求携带的会话。存储不可用不报告撤销成功，不清除尚需用于重试的 Cookie；所有响应禁止缓存。
+
+页面主动退出立即卸载受保护内容、清空当前登录输入并使迟到响应失效，通过 BroadcastChannel 通知同源已打开标签页保持清空。请求或响应丢失显示“退出未确认”，任意标签页可重试；确认完成或确认会话失效后同步进入登录界面。没有持久化退出锁，刷新/新页面仍可能识别到尚有效的 Cookie。已初始化页面不再提供会重新挂载会话组件的诊断刷新按钮，避免绕过内存退出状态；真正刷新页面仍遵循上述规则。独立浏览器会话不受当前退出影响，不宣称清除外层 Basic Auth。当前没有消息输入，未保存内容提示与草稿/发送清理在文本票补齐。
+
+管理员确认目标实例后，在终端隐藏输入新密码（规则与初始化一致）：
+
+```bash
+docker compose --env-file .env -f deploy/compose.dev.yml exec backend \
+  filehop --database-dir /data/database --files-dir /data/files reset-password
+```
+
+命令不接受密码参数，不执行初始化或迁移。新哈希和全部会话撤销在同一事务提交，不删除业务记录或服务器文件；失败不报告完成。旧密码验证若与重置并发，在创建会话的事务内重新核对所验证的哈希，避免重置后旧验证又创建有效登录。普通重启仍保留未过期会话。以上命令是说明，不代表已对任何现有实例执行重置。
+
+验收映射（S001-A09/A14 当前切片）：`backend/tests/session.rs` 验证 Origin、幂等、缺失/到期凭证、独立会话及存储失败；`session_process.rs` 通过真实 PTY 验证隐藏输入、无效新密码不撤销、成功重置撤销多个会话、旧密码拒绝、新密码登录及合成文件/存储身份保留。`web/tests/logout.ts` 在现有真实后端浏览器流程中验证同源多标签页、独立上下文、请求/响应丢失、迟到读取、前台恢复和非持久化退出状态。业务消息与发送标识尚未实现，其保留验证在文本票补齐；Chromium 自动化不代替 #13 稳定版 Chrome 与真实 HTTPS 验收。
 
 ## 安全与交付限制
 

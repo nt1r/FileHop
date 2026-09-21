@@ -45,10 +45,11 @@ export default function App() {
       <p className="eyebrow">FileHop</p>
       <h1>跨设备文本与文件交换</h1>
       {state === 'initialized' ? <SessionPage /> : <p role="status">{messages[state]}</p>}
-      <Button variant="primary" disabled={state === 'loading'} onClick={() => {
+      {/* 已初始化后由会话页处理重试，不能用诊断刷新重新挂载会话页，绕过内存中的退出待确认状态。 */}
+      {state !== 'initialized' && <Button variant="primary" disabled={state === 'loading'} onClick={() => {
         setState('loading')
         setAttempt((value) => value + 1)
-      }}>刷新状态</Button>
+      }}>刷新状态</Button>}
       <p className="notice">初始化只能由管理员在服务器上执行，不会因打开页面自动创建账户或数据库。</p>
     </main>
   )

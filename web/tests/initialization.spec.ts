@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { verifyLogout } from './logout'
 
 test('administrator initializes storage and the page observes the real status', async ({ page }) => {
   await page.clock.install()
@@ -72,8 +73,9 @@ test('administrator initializes storage and the page observes the real status', 
   await expect(page.getByRole('region', { name: '消息流' })).toBeVisible()
   expect(posts).toBe(1)
   await page.unroute('**/api/session')
+  await verifyLogout(page)
   writeFileSync(resolve(process.env.TEST_FILES!, 'storage-id'), 'mismatched')
-  await page.getByRole('button', { name: '刷新状态' }).click()
+  await page.reload()
   await expect(page.getByRole('status')).toContainText('存储异常')
   await page.route('**/api/status', route => route.fulfill({ status: 401, contentType: 'text/html', body: 'Access gate' }))
   await page.getByRole('button', { name: '刷新状态' }).click()

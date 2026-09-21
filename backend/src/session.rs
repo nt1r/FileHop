@@ -60,7 +60,7 @@ struct Service {
 
 pub fn router(database: PathBuf, files: PathBuf, config: Config) -> Router {
     Router::new()
-        .route("/api/session", get(current).post(login))
+        .route("/api/session", get(current).post(login).delete(logout))
         .with_state(Arc::new(Service {
             database,
             files,
@@ -146,6 +146,63 @@ impl Service {
     }
 }
 
+fn write_origin_allowed(service: &Service, headers: &HeaderMap) -> bool {
+    headers.get_all(header::ORIGIN).iter().count() == 1
+        && headers.get(header::ORIGIN).and_then(|v| v.to_str().ok())
+            == Some(service.config.origin.as_str())
+}
+
+async fn logout(State(service): State<Arc<Service>>, headers: HeaderMap) -> Response {
+    // 没有有效凭证也必须检查来源，否则跨站请求能强制清除浏览器的登录 Cookie。
+    if !write_origin_allowed(&service, &headers) {
+        return error(StatusCode::FORBIDDEN, "origin_rejected", "请求来源不被允许");
+    }
+    if headers.contains_key(header::AUTHORIZATION) {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "unsupported_auth",
+            "请求认证方式不被支持",
+        );
+    }
+    let mut connection = match service.connection().await {
+        Ok(c) => c,
+        Err(e) => return *e,
+    };
+    // 不要求会话尚未到期：删除不存在的摘要也是成功。遇到重复 Cookie 时一并撤销，
+    // 避免仅清除客户端 Cookie、却留下该请求携带的另一个有效会话。
+    let result: Result<(), sqlx::Error> = async {
+        let mut transaction = connection.begin().await?;
+        for token in headers
+            .get_all(header::COOKIE)
+            .iter()
+            .filter_map(|h| h.to_str().ok())
+            .flat_map(|h| h.split(';'))
+            .filter_map(|part| part.trim().strip_prefix("__Host-filehop="))
+        {
+            sqlx::query("DELETE FROM session WHERE digest = ?")
+                .bind(Sha256::digest(token.as_bytes()).to_vec())
+                .execute(&mut *transaction)
+                .await?;
+        }
+        transaction.commit().await
+    }
+    .await;
+    if result.is_err() {
+        return unavailable();
+    }
+    (
+        [
+            (header::CACHE_CONTROL, "no-store"),
+            (
+                header::SET_COOKIE,
+                "__Host-filehop=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0",
+            ),
+        ],
+        Json(serde_json::json!({"state": "logged_out"})),
+    )
+        .into_response()
+}
+
 async fn current(State(service): State<Arc<Service>>, headers: HeaderMap) -> Response {
     if headers.contains_key(header::AUTHORIZATION) {
         return unauthorized();
@@ -200,10 +257,7 @@ async fn login(
     headers: HeaderMap,
     body: Body,
 ) -> Response {
-    if headers.get_all(header::ORIGIN).iter().count() != 1
-        || headers.get(header::ORIGIN).and_then(|v| v.to_str().ok())
-            != Some(service.config.origin.as_str())
-    {
+    if !write_origin_allowed(&service, &headers) {
         return error(StatusCode::FORBIDDEN, "origin_rejected", "请求来源不被允许");
     }
     if headers.contains_key(header::AUTHORIZATION) {
@@ -302,6 +356,7 @@ async fn verify_and_create(service: &Service, credentials: Credentials) -> Respo
         && (12..=128).contains(&credentials.password.chars().count());
     let matches_user = valid_shape && credentials.username.to_ascii_lowercase() == username;
     // 未知用户名也执行同一参数、同一开销的密码验证，但永远不能因此获得会话。
+    let verified_hash = hash.clone();
     let verified = tokio::task::spawn_blocking(move || {
         PasswordHash::new(&hash).ok().is_some_and(|hash| {
             Argon2::default()
@@ -323,11 +378,15 @@ async fn verify_and_create(service: &Service, credentials: Credentials) -> Respo
             .bind(now)
             .execute(&mut *transaction)
             .await?;
-        sqlx::query("INSERT INTO session (digest, expires_at) VALUES (?, ?)")
+        // 验证密码期间管理员可能已经重置。写事务内重新核对所验证的哈希，
+        // 防止旧密码验证迟到后又创建逃过全部撤销的新会话。
+        let inserted = sqlx::query("INSERT INTO session (digest, expires_at) SELECT ?, ? FROM account WHERE singleton = 1 AND password_hash = ?")
             .bind(Sha256::digest(token.as_bytes()).to_vec())
             .bind(expires)
+            .bind(verified_hash)
             .execute(&mut *transaction)
             .await?;
+        if inserted.rows_affected() != 1 { return Err(sqlx::Error::RowNotFound); }
         transaction.commit().await
     }
     .await;

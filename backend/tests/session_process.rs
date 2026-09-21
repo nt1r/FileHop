@@ -112,6 +112,108 @@ fn committed_session_survives_sigkill_and_restart() {
 }
 
 #[tokio::test]
+async fn password_reset_hides_input_revokes_all_sessions_and_preserves_storage() {
+    let root = tempfile::tempdir().unwrap();
+    let database = root.path().join("database");
+    let files = root.path().join("files");
+    std::fs::create_dir(&database).unwrap();
+    std::fs::create_dir(&files).unwrap();
+    backend::storage::initialize(&database, &files, "Admin", " synthetic password ")
+        .await
+        .unwrap();
+    let sentinel = files.join("synthetic-business-data");
+    std::fs::write(&sentinel, b"preserve this content").unwrap();
+    let identity = std::fs::read(database.join("storage-id")).unwrap();
+    let app = backend::app(database.clone(), files.clone());
+    let login = |password: &str| {
+        app.clone().oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/session")
+                .header("origin", "https://filehop.invalid")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({"username":"Admin", "password":password}).to_string(),
+                ))
+                .unwrap(),
+        )
+    };
+    let mut cookies = Vec::new();
+    for _ in 0..2 {
+        let response = login(" synthetic password ").await.unwrap();
+        assert!(response.status().is_success());
+        cookies.push(
+            response.headers()["set-cookie"]
+                .to_str()
+                .unwrap()
+                .split(';')
+                .next()
+                .unwrap()
+                .to_owned(),
+        );
+    }
+    let reset = |password: &str| {
+        let mut command = CommandBuilder::new(env!("CARGO_BIN_EXE_backend"));
+        command.args([
+            "--database-dir",
+            database.to_str().unwrap(),
+            "--files-dir",
+            files.to_str().unwrap(),
+            "reset-password",
+        ]);
+        support::terminal(command, password)
+    };
+    let (success, output) = reset("short");
+    assert!(!success);
+    assert!(!output.contains("short"));
+    for cookie in &cookies {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/session")
+                    .header("cookie", cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+    }
+    let (success, output) = reset(" new synthetic password ");
+    assert!(success, "{output}");
+    assert!(!output.contains("new synthetic password"));
+    for cookie in &cookies {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/session")
+                    .header("cookie", cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 401);
+    }
+    assert_eq!(login(" synthetic password ").await.unwrap().status(), 401);
+    assert_eq!(
+        login(" new synthetic password ").await.unwrap().status(),
+        200
+    );
+    assert_eq!(std::fs::read(&sentinel).unwrap(), b"preserve this content");
+    assert_eq!(
+        std::fs::read(database.join("storage-id")).unwrap(),
+        identity
+    );
+    assert!(matches!(
+        backend::storage::inspect(&database, &files).await,
+        backend::storage::Status::Initialized
+    ));
+}
+
+#[tokio::test]
 #[ignore = "manual release-mode resource measurement"]
 async fn measure_login_budget() {
     let root = tempfile::tempdir().unwrap();
