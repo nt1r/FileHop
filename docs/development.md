@@ -17,6 +17,8 @@
 
 ## 工具链与本地检查
 
+测试工具目标已统一为 Rust / Playwright / Bash，见[测试规范](testing.md)。当前下列命令仍包含历史 Python 实现，尚待按行为覆盖等价迁移；保留这些真实可执行的命令不代表允许继续新增 Python 测试，也不代表替换已经完成。
+
 - Node `24.21.0`（`.nvmrc`），npm `11.19.0`。
 - Rust `1.98.1`，rustfmt / Clippy（`rust-toolchain.toml`）；安装后确认 `cargo`、`rustc` 可在开发终端调用。
 - Docker Engine 与支持当前配置的 Compose v2+。
