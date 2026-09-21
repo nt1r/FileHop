@@ -57,6 +57,20 @@ bash tests/web_container_smoke.sh
 
 后端冒烟验证未初始化容器重建不创建数据、Compose 内隐藏输入初始化及重建后挂载数据可被状态 interface 验证。测试容器使用调用者 UID/GID，数据仅在一次性目录内；不代表生产部署或后续消息/文件持久化验收。
 
+## GitHub Actions 缓存
+
+`.github/workflows/check.yml` 在 GitHub 托管 runner 上复用以下缓存，不跳过原有安装、构建或测试：
+
+- pnpm：Corepack 启用固定版本后，在 `web/` 中查询实际 store 路径，通过 `actions/cache` 保存下载内容，不缓存 `node_modules`。键区分 OS、架构、Node/包管理器配置和锁文件；锁文件变化时可恢复兼容的旧下载内容，再由 `--frozen-lockfile` 补齐。
+- Cargo：`Swatinem/rust-cache` 缓存下载与 `backend/target` 中的依赖编译产物，不缓存工具安装目录。键区分 runner OS/架构，并由 Action 纳入实际 Rust 编译器、相关环境变量、工具链文件、Cargo manifest 和锁文件。
+- Docker：Buildx 使用 GitHub Actions v2 缓存后端，前后端按 OS/架构使用独立 `checks-*` scope，`mode=max` 包含中间构建层；工具链镜像、锁文件与源码变化由 BuildKit 层摘要判断。镜像不推送仓库，通过 `load: true` 加载到本次 runner，继续运行现有容器冒烟。
+
+这些缓存仅用于检查，不作为发布制品或未来特权发布的可信输入。GitHub 将 PR 写入的缓存限制在该 PR 的 merge ref，PR 可读取可见的基分支缓存，不能将其写回基分支。未来发布流程须使用独立缓存命名空间与可信准入，不能直接复用检查缓存。缓存内容不得包含凭证、数据库或真实用户文件。
+
+首次运行、依赖/工具链更新或缓存被淘汰后仍可能下载；缓存命中也仍执行安装与正确性检查。宿主 Cargo/pnpm 缓存与 Docker 构建缓存互不共享。后端 Dockerfile 目前源码改变会使 release 编译层失效，本次只增加跨运行层缓存，不引入依赖预编译分层。Playwright 浏览器和 Linux 系统依赖暂不缓存。
+
+验证冷/热缓存时，在 GitHub 上观察同一 PR 的首次运行与再次运行：两次完整检查都应通过；第二次 pnpm/Cargo 步骤应报告缓存恢复，Docker 应出现缓存导入及适用层的 `CACHED`，且两个容器冒烟仍执行。需要强制冷缓存时，在临时测试分支更换缓存键前缀和 Docker scope，不删除共享缓存。实际命中率与耗时以对应运行日志为准，本地静态校验不能代替此验证。
+
 ## 开发运行：需先完成环境接入
 
 开发者连接 VPS；浏览器仅使用开发域名的 HTTPS/WSS 443。不要直接在 VPS 执行 `cargo run` 或将 Vite 端口映射到公网。本工程不自动接入现有 Caddy、不自动创建网络、不修改防火墙，也不启动第二个入口抢占 443。
