@@ -62,7 +62,7 @@ fn create(path: &Path, content: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn options(path: &Path) -> SqliteConnectOptions {
+pub(crate) fn options(path: &Path) -> SqliteConnectOptions {
     SqliteConnectOptions::new()
         .filename(path)
         .create_if_missing(false)

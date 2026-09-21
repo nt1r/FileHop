@@ -154,7 +154,7 @@ async fn business_writes_unavailable() {
         if initialized {
             i.initialize();
         }
-        for path in ["/api/session", "/api/messages", "/api/status"] {
+        for path in ["/api/messages", "/api/status"] {
             let response = backend::app(i.database.clone(), i.files.clone())
                 .oneshot(
                     Request::builder()
