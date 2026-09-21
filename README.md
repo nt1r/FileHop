@@ -45,9 +45,12 @@ docker compose --env-file .env.example -f deploy/compose.dev.yml config --quiet
 docker build -f deploy/backend.Dockerfile -t filehop-issue6-backend .
 docker build -f deploy/web.Dockerfile -t filehop-issue6-web .
 python3 tests/compose_smoke.py
+python3 tests/web_container_smoke.py
 ```
 
-该冒烟验证未初始化容器重建不创建数据、Compose 内隐藏输入初始化及重建后挂载数据可被状态 interface 验证。测试容器使用调用者 UID/GID，数据仅在一次性目录内；不代表生产部署或后续消息/文件持久化验收。
+前端冒烟验证根目录及嵌套 `.env*` 文件不进入构建上下文，并以非 root 用户、实际开发只读挂载启动 Vite，检查 HTML 与源码转换响应；不发布端口。
+
+后端冒烟验证未初始化容器重建不创建数据、Compose 内隐藏输入初始化及重建后挂载数据可被状态 interface 验证。测试容器使用调用者 UID/GID，数据仅在一次性目录内；不代表生产部署或后续消息/文件持久化验收。
 
 ## 开发运行：需先完成环境接入
 

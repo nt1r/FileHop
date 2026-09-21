@@ -51,5 +51,6 @@ jobs:
       - name: Container builds
         run: |
           docker build -f deploy/backend.Dockerfile -t filehop-issue6-backend .
-          docker build -f deploy/web.Dockerfile -t filehop-web-check .
+          docker build -f deploy/web.Dockerfile -t filehop-issue6-web .
           python3 tests/compose_smoke.py
+          python3 tests/web_container_smoke.py

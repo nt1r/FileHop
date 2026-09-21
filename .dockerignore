@@ -2,8 +2,8 @@
 **/node_modules
 **/dist
 **/target
-.env
-.env.*
+**/.env
+**/.env.*
 secrets
 data-dev
 data-test
