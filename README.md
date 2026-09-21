@@ -72,6 +72,8 @@ python3 tests/web_container_smoke.py
 
 **以上是操作说明，不代表网络、域名、Caddy 或真实账户已经配置。** 普通运行不会创建数据库或账户，不能用 `sqlx database create` 代替显式初始化。
 
+迁移编号、`main` 冻结、checksum、开发数据与发布关联规则见[数据库迁移维护规则](backend/migrations/README.md)。已有实例的独立升级命令尚未实现，不能用 `init` 代替升级。
+
 ### 显式初始化
 
 确认开发数据目标目录全新、可写且彼此独立，然后执行（命令显示目标路径，密码通过终端隐藏输入，不接受密码参数）：
