@@ -24,6 +24,14 @@ enum Command {
     Serve {
         #[arg(long, default_value = "0.0.0.0:8080")]
         listen: SocketAddr,
+        #[arg(
+            long,
+            env = "FILEHOP_ORIGIN",
+            default_value = "https://filehop.invalid"
+        )]
+        origin: String,
+        #[arg(long, env = "FILEHOP_TRUSTED_PROXY")]
+        trusted_proxy: Option<std::net::IpAddr>,
     },
 }
 
@@ -45,15 +53,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 .await?;
             println!("Initialization completed.");
         }
-        Command::Serve { listen } => {
-            // Diagnose storage before listening; business writes are not registered.
+        Command::Serve {
+            listen,
+            origin,
+            trusted_proxy,
+        } => {
+            // Origin 来自显式配置，绝不根据来访请求的 Host 推断可信站点。
+            let uri: axum::http::Uri = origin.parse()?;
+            if uri.scheme_str() != Some("https")
+                || uri.authority().is_none()
+                || uri.path_and_query().is_some_and(|p| p.as_str() != "/")
+                || origin.ends_with('/')
+                || origin.contains('@')
+            {
+                return Err(
+                    "FILEHOP_ORIGIN must be an exact HTTPS origin without trailing slash".into(),
+                );
+            }
+            // 未初始化仍可监听诊断；认证接口独立检查存储，不创建替代实例。
             let status = backend::storage::inspect(&cli.database_dir, &cli.files_dir).await;
             eprintln!("storage_status={}", serde_json::to_string(&status)?);
             let listener = tokio::net::TcpListener::bind(listen).await?;
             println!("listening={}", listener.local_addr()?);
-            axum::serve(listener, backend::app(cli.database_dir, cli.files_dir))
-                .with_graceful_shutdown(shutdown())
-                .await?;
+            let app = backend::app_with_config(
+                cli.database_dir,
+                cli.files_dir,
+                backend::session::Config {
+                    origin,
+                    trusted_proxy,
+                    ..Default::default()
+                },
+            );
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .with_graceful_shutdown(shutdown())
+            .await?;
         }
     }
     Ok(())

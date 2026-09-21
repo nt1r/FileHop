@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@cloudflare/kumo/components/button'
+import SessionPage from './Session'
 
 type State = 'loading' | 'uninitialized' | 'initialized' | 'storage_error' | 'unavailable'
 const messages: Record<State, string> = {
   loading: '正在检查初始化状态…',
   uninitialized: '请管理员先初始化：在服务器上运行显式初始化命令。此页面不提供注册。',
-  initialized: '已初始化。账户与受管存储已就绪；登录功能将在后续任务实现。',
+  initialized: '已初始化。',
   storage_error: '存储异常。请管理员检查挂载、存储标识及初始化状态；不要删除数据或重新初始化。',
   unavailable: '无法获取应用状态。请检查网络或开发访问层，然后重试。',
 }
@@ -43,7 +44,7 @@ export default function App() {
     <main className="welcome">
       <p className="eyebrow">FileHop</p>
       <h1>跨设备文本与文件交换</h1>
-      <p role="status">{messages[state]}</p>
+      {state === 'initialized' ? <SessionPage /> : <p role="status">{messages[state]}</p>}
       <Button variant="primary" disabled={state === 'loading'} onClick={() => {
         setState('loading')
         setAttempt((value) => value + 1)

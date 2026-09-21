@@ -15,7 +15,10 @@ https://{$FILEHOP_DEV_HOST} {
 		# The development gate is not application authentication.
 		request_header -Authorization
 		handle /api/* {
-			reverse_proxy filehop-dev-backend:8080
+			reverse_proxy filehop-dev-backend:8080 {
+				# 覆盖客户端同名头；后端只信任显式配置的 Caddy 内网 IP。
+				header_up X-FileHop-Client-IP {remote_host}
+			}
 		}
 		# Never expose internal liveness or future diagnostic routes.
 		handle /internal/* {
