@@ -1,5 +1,7 @@
 # Contributing
 
+See the [development guide](docs/development.md) for toolchains, build/test commands, and isolated development setup.
+
 - `dev` is the repository's default branch. Start a working branch from `dev` and open its pull request against `dev`; verify the base before submitting.
 - Open release pull requests from this repository's `dev` branch into `main`.
 - Direct pushes, force pushes, and deletion of `main` or `dev` are blocked.

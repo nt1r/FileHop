@@ -1,110 +1,52 @@
 # FileHop
 
-轻量、自托管的跨设备文本与文件交换工具。产品范围见 [产品基线](docs/product.md)，实现顺序见 [路线图](docs/roadmap.md)。
+轻量、自托管的跨设备文本与文件交换工具，面向个人使用。
 
-## 当前实现状态
+FileHop 希望让桌面浏览器与 Android 手机通过自己的服务器共享一条私人消息流，方便传递文字、链接、命令片段和文件，无需选择接收设备。
 
-本次实现 [Issue #6](https://github.com/nt1r/FileHop/issues/6) 的隔离启动与显式初始化闭环：
+> **项目正在开发中，尚不能作为完整的文本与文件交换工具使用。** 当前已实现基础运行框架、显式账户初始化和初始化状态页面；登录、消息交换、文件传输及 Android 应用尚未实现。
 
-- `web/`：Vite + React + TypeScript + Kumo standalone 样式，初始化状态页面与手动刷新。
-- `backend/`：Axum + Tokio + SQLx SQLite；显式 `init` 管理命令、存储标识与账户迁移、`GET /api/status`。
-- `deploy/`：开发应用 Compose、容器构建文件及共享 Caddy 站点示例。
-- `GET /internal/live` 仅返回 204，表示进程可响应；**不是数据库可用或业务就绪检查**。不通过公网入口开放。
+## 产品方向
 
-状态查询仅返回 `uninitialized`、`initialized` 或 `storage_error`，禁止缓存且不泄露目录、账户或凭证。未初始化与存储异常不开放业务写入。认证、消息、文件、Android 及正式发布尚未实现；初始化成功不代表整个 Spec 001 已完成。GitHub 托管 CI 配置已加入，但远端运行结果需在推送后确认。
+以下是计划交付的能力，不代表当前版本已经可用：
 
-## 工具链与本地检查
+- **桌面 Web ↔ Android**：浏览器与原生 Android 应用共享消息历史。
+- **纯文本交换**：保留换行和缩进，支持主动复制，不自动覆盖剪贴板。
+- **文件传输**：经自建服务器上传和下载，管理服务器文件占用。
+- **单用户私人空间**：一个实例服务一个用户，通过账户认证访问。
+- **自托管**：使用 SQLite 和本地文件存储，无需独立数据库服务。
 
-- Node `24.21.0`（`.nvmrc`），npm `11.19.0`。
-- Rust `1.98.1`，rustfmt / Clippy（`rust-toolchain.toml`）。如果已安装但命令不存在，将 `$HOME/.cargo/bin` 加入 PATH。
-- Docker Engine 与 Compose v2+；初始化时配置解析使用 Compose `v5.5.1`。
-- 提交 `web/package-lock.json` 和 `backend/Cargo.lock`；安装和构建遵循锁文件。
+完整范围与交付进度见[产品说明](docs/product.md)和[路线图](docs/roadmap.md)。
 
-从仓库根目录执行，不需要数据库、账户或公网端口：
+## 适用范围
 
-```bash
-npm --prefix web ci
-npm --prefix web run lint
-npm --prefix web run build
-cargo fmt --manifest-path backend/Cargo.toml --check
-cargo clippy --manifest-path backend/Cargo.toml --locked --all-targets -- -D warnings
-cargo test --manifest-path backend/Cargo.toml --locked
-cargo build --manifest-path backend/Cargo.toml --locked
-python3 -m unittest discover -s tests -v
-(cd web && npx playwright install chromium)
-python3 tests/browser.py
-# 仅验证示例配置；不创建网络、容器或数据目录。
-docker compose --env-file .env.example -f deploy/compose.dev.yml config --quiet
-```
+FileHop 用于临时交换文本与文件，不是网盘、目录同步工具或唯一备份。
 
-测试通过公开 CLI（伪终端隐藏输入）、状态 HTTP interface 和浏览器页面验证 S001-A01。使用 Python 标准库临时目录、真实 SQLite 和回环随机端口；无需真实账户或开发域名，不以假数据库证明一致性。测试仅支持 Linux，权限用例须以非 root 用户运行。浏览器使用 Playwright Chromium，不代替正式稳定版 Chrome/HTTPS 验收。
+- 桌面 Web 是目标客户端；不承诺手机浏览器体验。
+- 不提供多用户注册、设备间直连、后台可靠同步或系统通知。
+- 规划中的传输通过 HTTPS 保护；不提供端到端加密，也不承诺服务器数据静态加密。
+- 不提供备份恢复能力，重要文件应另行保留副本。
 
-可选的隔离容器检查（不发布端口、不加入共享网络）：
+## 技术方案
 
-```bash
-docker build -f deploy/backend.Dockerfile -t filehop-issue6-backend .
-docker build -f deploy/web.Dockerfile -t filehop-issue6-web .
-python3 tests/compose_smoke.py
-python3 tests/web_container_smoke.py
-```
+| 部分 | 技术 |
+| --- | --- |
+| 桌面 Web | React、Cloudflare Kumo |
+| 后端 | Rust、Axum、Tokio |
+| 数据库 | SQLite、SQLx |
+| 运行与入口 | Docker Compose、Caddy |
+| Android（待实现） | Kotlin、Jetpack Compose |
 
-前端冒烟验证根目录及嵌套 `.env*` 文件不进入构建上下文，并以非 root 用户、实际开发只读挂载启动 Vite，检查 HTML 与源码转换响应；不发布端口。
+## 参与开发
 
-后端冒烟验证未初始化容器重建不创建数据、Compose 内隐藏输入初始化及重建后挂载数据可被状态 interface 验证。测试容器使用调用者 UID/GID，数据仅在一次性目录内；不代表生产部署或后续消息/文件持久化验收。
+欢迎通过 [GitHub Issues](https://github.com/nt1r/FileHop/issues) 反馈问题或讨论改进。
 
-## 开发运行：需先完成环境接入
+- [贡献指南](CONTRIBUTING.md)：分支与 PR 流程。
+- [开发指南](docs/development.md)：工具链、构建、测试及隔离开发环境运行。
+- [测试原则](docs/testing.md)：测试与验收要求。
 
-开发者连接 VPS；浏览器仅使用开发域名的 HTTPS/WSS 443。不要直接在 VPS 执行 `cargo run` 或将 Vite 端口映射到公网。本工程不自动接入现有 Caddy、不自动创建网络、不修改防火墙，也不启动第二个入口抢占 443。
+当前仓库中的运行配置用于开发，不是已完成验收的生产安装方案。
 
-1. 将 `.env.example` 复制为 `.env`，填写完整开发域名及**专用开发网络**名称。示例 `.invalid` 域名不能用于真实接入。
-2. 经操作者确认后，为开发栈建立网络并让共享 Caddy 加入。生产与开发不得共用应用网络；开发代理别名为 `filehop-dev-backend` / `filehop-dev-web`，应用内后端仍为 `backend:8080`。
-3. 确认仓库所在绝对路径后，建立 `data-dev/database`、`data-dev/files`。后端容器以 UID/GID `10001` 运行，未来显式初始化需要这两个目录可写；由操作者设置目录权限，不使用 `chmod 777`。Compose 拒绝自动创建缺失的挂载目录。
-4. 审阅 `deploy/Caddyfile.dev.example` 并整合至共享入口。开发域名、独立 Basic Auth 用户及密码哈希由 Caddy 的受控本地配置提供；应用 `.env` 不会自动传给共享 Caddy。真实密码与哈希均不提交 Git。Caddy 转发前移除外层 Authorization；外层错误带 `X-FileHop-Access-Layer: development`，客户端后续不得将其误认为应用会话失效。
-5. 共享入口全局配置须关闭自动 HTTP 跳转（`auto_https disable_redirects`），仅发布 TCP 443，使用 TLS-ALPN-01；示例禁用 HTTP-01。修改共享全局配置会影响其他站点，须单独审阅授权。确认 DNS/CAA、OCI 规则和实际可达性，不能通过忽略证书检查验收。
-6. 配置校验及授权完成后，才在根目录执行：
+## 许可证
 
-   ```bash
-   docker compose --env-file .env -f deploy/compose.dev.yml config --quiet
-   docker compose --env-file .env -f deploy/compose.dev.yml up --build -d
-   ```
-
-浏览器访问 `https://<开发域名>`，先通过开发外层认证。HMR 经同域 WSS 443，源文件只读挂载供热更新；依赖变更需重新构建。Compose 不发布前后端端口，Caddy 不挂载数据库或文件目录。
-
-**以上是操作说明，不代表网络、域名、Caddy 或真实账户已经配置。** 普通运行不会创建数据库或账户，不能用 `sqlx database create` 代替显式初始化。
-
-迁移编号、`main` 冻结、checksum、开发数据与发布关联规则见[数据库迁移维护规则](backend/migrations/README.md)。已有实例的独立升级命令尚未实现，不能用 `init` 代替升级。
-
-### 显式初始化
-
-确认开发数据目标目录全新、可写且彼此独立，然后执行（命令显示目标路径，密码通过终端隐藏输入，不接受密码参数）：
-
-```bash
-docker compose --env-file .env -f deploy/compose.dev.yml exec backend \
-  filehop --database-dir /data/database --files-dir /data/files \
-  init --username your_admin --confirm-paths
-```
-
-`--confirm-paths` 表示操作者已确认上述两个路径；不代表允许覆盖。用户名为 3–32 个 ASCII 字母、数字、`_`、`-`，保存时转小写；密码为 12–128 个 Unicode 码点，不 trim。初始化成功后在页面点击“刷新状态”，无需重启后端。
-
-数据库位于 `database/transfer.db`；两个根目录各有 `storage-id`，数据库也保存同一标识。使用 SQLite WAL + synchronous=FULL、事务、版本迁移与 Argon2id 随机盐哈希。初始化以目录排他锁协调并发，拒绝非空目录、重复/部分初始化及嵌套目录。普通检查不建库、不执行迁移；标识缺失、不匹配、数据库丢失或访问失败返回存储异常。
-
-跨目录操作不是原子的。发生部分失败时保留残留并报告部分完成，**不要删除、覆盖或盲目重试**；先停止相关操作并人工核对两个目标目录。没有自动恢复、清库或密码重置入口（重置属于 #8）。目前状态检查是诊断，不代替后续业务写入在使用存储时的验证。
-
-Argon2id 当前采用依赖默认参数（v0.6：m=19456 KiB、t=2、p=1），初始化一次约需 19 MiB 算法内存。登录并发预算与生产性能测量属于 #7，不能将初始化耗时当作登录容量保证。
-
-## 安全与交付限制
-
-- `.env`、`secrets/`、开发数据、数据库及本地 Caddy 配置由 Git 与 Docker 构建上下文排除；示例只含占位值。
-- 前端不能包含运行密钥；不要把密码放入 `VITE_*` 环境变量。
-- 当前不记录请求正文、密码或凭证；仅持久化实例标识与账户哈希。Compose 配置容器日志轮转。
-- 当前容器配置为开发骨架，不是 Spec 004 生产产物或完整安全验收。
-- 真实稳定版 Chrome、HTTPS/Basic Auth/WSS 由 #13 验证；本地 Chromium、隔离容器及静态配置检查不能代替这些验证。
-
-## 官方参考
-
-- [React：从零构建应用](https://react.dev/learn/build-a-react-app-from-scratch)
-- [Vite：初始化](https://vite.dev/guide/) / [开发服务器配置](https://vite.dev/config/server-options)
-- [Kumo：安装与 standalone 样式](https://kumo-ui.com/installation)
-- [Cargo：cargo new](https://doc.rust-lang.org/cargo/commands/cargo-new.html)
-- [Axum](https://docs.rs/axum/latest/axum/) / [SQLx](https://docs.rs/sqlx/latest/sqlx/)
-- [Docker Compose](https://docs.docker.com/compose/) / [Caddy Basic Auth](https://caddyserver.com/docs/caddyfile/directives/basic_auth)
+本项目采用 [Apache License 2.0](LICENSE)。
