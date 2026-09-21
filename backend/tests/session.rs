@@ -2,6 +2,7 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
 };
+use sqlx::Connection;
 use std::sync::{
     Arc,
     atomic::{AtomicI64, Ordering},
@@ -429,6 +430,22 @@ async fn login_restores_a_fixed_lifetime_session_after_restart() {
     backend::storage::initialize(&database, &files, "Admin", " synthetic password ")
         .await
         .unwrap();
+    // 安全检查需要同时扫描主库与 WAL：登录连接异步关闭时，SQLite 可能删除
+    // WAL/SHM，导致列目录后文件消失。先建立真实读取快照并持有到扫描完成，
+    // 让登录仍可提交到 WAL，同时避免漏检暂未合并到主库的凭证数据。
+    let mut observer = sqlx::SqliteConnection::connect_with(
+        &sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(database.join("transfer.db"))
+            .create_if_missing(false)
+            .read_only(true),
+    )
+    .await
+    .unwrap();
+    let mut snapshot = observer.begin().await.unwrap();
+    sqlx::query("SELECT name FROM sqlite_schema")
+        .fetch_all(&mut *snapshot)
+        .await
+        .unwrap();
     let app = backend::app(database.clone(), files.clone());
     let response = app
         .oneshot(
@@ -470,6 +487,8 @@ async fn login_restores_a_fixed_lifetime_session_after_restart() {
                 .any(|window| window == token.as_bytes())
         );
     }
+    snapshot.rollback().await.unwrap();
+    observer.close().await.unwrap();
     let login: serde_json::Value =
         serde_json::from_slice(&to_bytes(response.into_body(), 8192).await.unwrap()).unwrap();
     let response = backend::app(database, files)
