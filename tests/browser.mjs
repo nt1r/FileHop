@@ -30,7 +30,7 @@ const server = createServer(async (request, response) => {
   } catch { response.writeHead(502); response.end() }
 })
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
-const child = spawn('npm', ['--prefix', 'web', 'run', 'test:e2e'], {
+const child = spawn('pnpm', ['-C', 'web', 'run', 'test:e2e'], {
   stdio: 'inherit', env: { ...process.env, TEST_BASE_URL: `http://127.0.0.1:${server.address().port}` },
 })
 for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => child.kill(signal))

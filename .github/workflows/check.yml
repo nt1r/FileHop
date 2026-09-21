@@ -24,10 +24,11 @@ jobs:
           node-version-file: .nvmrc
       - name: Toolchains
         run: |
-          npm install --global npm@11.19.0
+          corepack enable pnpm
+          corepack prepare pnpm@12.5.1 --activate
           rustup show
           node --version
-          npm --version
+          pnpm --version
           rustc --version
       - name: Rust checks
         run: |
@@ -39,11 +40,10 @@ jobs:
         run: bash -n tests/browser.sh tests/compose_smoke.sh tests/web_container_smoke.sh
       - name: Web checks
         run: |
-          npm --prefix web ci
-          npm --prefix web run lint
-          npm --prefix web run build
-          cd web
-          npx playwright install --with-deps chromium
+          pnpm -C web install --frozen-lockfile
+          pnpm -C web run lint
+          pnpm -C web run build
+          pnpm -C web exec playwright install --with-deps chromium
       - name: Browser initialization loop
         run: bash tests/browser.sh
       - name: Compose configuration

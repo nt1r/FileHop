@@ -19,22 +19,24 @@
 
 测试使用 Rust / Playwright / Bash，见[测试规范](testing.md)，不需要 Python。Bash 在 Linux 宿主机或 CI runner 上编排，需具备 Node、Cargo、Docker、curl 及标准 GNU 工具；不要求应用镜像提供这些宿主工具。
 
-- Node `24.21.0`（`.nvmrc`），npm `11.19.0`。
+- Node `24.21.0`（`.nvmrc`），pnpm `12.5.1`（`web/package.json` 的 `packageManager`）。使用随该 Node 版本提供的 Corepack：`corepack enable pnpm`，再执行 `corepack prepare pnpm@12.5.1 --activate`。
 - Rust `1.98.1`，rustfmt / Clippy（`rust-toolchain.toml`）；安装后确认 `cargo`、`rustc` 可在开发终端调用。
 - Docker Engine 与支持当前配置的 Compose v2+。
-- 提交 `web/package-lock.json` 和 `backend/Cargo.lock`；安装和构建遵循锁文件。
+- 提交 `web/pnpm-lock.yaml` 和 `backend/Cargo.lock`；CI 与容器安装使用 `--frozen-lockfile`，不维护 npm 锁文件。
+- 多 worktree 使用同一用户的默认 pnpm store，各 worktree 独立安装并保留自己的 `node_modules`；不手工共享整个安装目录。默认 store 可能随项目所在磁盘变化，可用 `pnpm -C web store path` 核对；不要假定不同挂载点一定共用一个 store。同文件系统可复用包文件，跨文件系统可能复制。Docker 构建不自动复用宿主 store，Playwright 浏览器缓存也独立管理。
+- 不无条件放开依赖安装脚本。新增或升级依赖若需要构建脚本，审阅后按当前 pnpm 支持的配置显式批准，再验证干净安装和容器运行；本次依赖无需额外放行即可构建。
 
 从仓库根目录执行，不需要数据库、账户或公网端口：
 
 ```bash
-npm --prefix web ci
-npm --prefix web run lint
-npm --prefix web run build
+pnpm -C web install --frozen-lockfile
+pnpm -C web run lint
+pnpm -C web run build
 cargo fmt --manifest-path backend/Cargo.toml --check
 cargo clippy --manifest-path backend/Cargo.toml --locked --all-targets -- -D warnings
 cargo test --manifest-path backend/Cargo.toml --locked
 cargo build --manifest-path backend/Cargo.toml --locked
-(cd web && npx playwright install chromium)
+pnpm -C web exec playwright install chromium
 bash tests/browser.sh
 # 仅验证示例配置；不创建网络、容器或数据目录。
 docker compose --env-file .env.example -f deploy/compose.dev.yml config --quiet
