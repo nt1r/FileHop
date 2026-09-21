@@ -17,8 +17,19 @@ const root = resolve('web/dist')
 const server = createServer(async (request, response) => {
   try {
     if (request.url.startsWith('/api/')) {
-      const upstream = await fetch(backend + request.url, { signal: AbortSignal.timeout(5000) })
-      response.writeHead(upstream.status, { 'content-type': upstream.headers.get('content-type'), 'cache-control': 'no-store' })
+      const chunks = []
+      for await (const chunk of request) chunks.push(chunk)
+      const headers = { ...request.headers }
+      // 一次性回环测试代理：只映射本测试站点的 Origin，错误来源原样交给后端拒绝。
+      if (headers.origin === `http://localhost:${server.address().port}`) headers.origin = 'https://filehop.invalid'
+      delete headers.host
+      delete headers['content-length']
+      const upstream = await fetch(backend + request.url, {
+        method: request.method, headers,
+        ...(chunks.length ? { body: Buffer.concat(chunks) } : {}),
+        signal: AbortSignal.timeout(30000),
+      })
+      response.writeHead(upstream.status, Object.fromEntries(upstream.headers))
       response.end(Buffer.from(await upstream.arrayBuffer()))
     } else {
       const path = resolve(root, '.' + (request.url === '/' ? '/index.html' : new URL(request.url, 'http://localhost').pathname))
@@ -31,7 +42,7 @@ const server = createServer(async (request, response) => {
 })
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
 const child = spawn('pnpm', ['-C', 'web', 'run', 'test:e2e'], {
-  stdio: 'inherit', env: { ...process.env, TEST_BASE_URL: `http://127.0.0.1:${server.address().port}` },
+  stdio: 'inherit', env: { ...process.env, TEST_BASE_URL: `http://localhost:${server.address().port}` },
 })
 for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => child.kill(signal))
 const code = await new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', code => resolve(code ?? 1)) })

@@ -20,12 +20,15 @@ async fn liveness_does_not_claim_business_readiness() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
-    for path in ["/api/session", "/api/messages"] {
+    for (path, expected) in [
+        ("/api/session", StatusCode::UNAUTHORIZED),
+        ("/api/messages", StatusCode::NOT_FOUND),
+    ] {
         let response = app
             .clone()
             .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(response.status(), expected);
     }
 }

@@ -6,14 +6,14 @@
 
 ## 当前实现状态
 
-当前开发切片支持隔离启动与显式初始化：
+当前开发切片支持隔离启动、显式初始化及安全登录恢复：
 
-- `web/`：Vite + React + TypeScript + Kumo standalone 样式，初始化状态页面与手动刷新。
-- `backend/`：Axum + Tokio + SQLx SQLite；显式 `init` 管理命令、存储标识与账户迁移、`GET /api/status`。
+- `web/`：Vite + React + TypeScript + Kumo standalone 样式，初始化状态页面、安全登录、受保护的空消息页及同页重新登录。
+- `backend/`：Axum + Tokio + SQLx SQLite；显式 `init` 管理命令、存储标识与账户迁移、`GET /api/status`、`POST /api/session`、`GET /api/session`。
 - `deploy/`：开发应用 Compose、容器构建文件及共享 Caddy 站点示例。
 - `GET /internal/live` 仅返回 204，表示进程可响应；**不是数据库可用或业务就绪检查**。不通过公网入口开放。
 
-状态查询仅返回 `uninitialized`、`initialized` 或 `storage_error`，禁止缓存且不泄露目录、账户或凭证。未初始化与存储异常不开放业务写入。认证、消息、文件、Android 及正式发布尚未实现；初始化成功不代表整个 Spec 001 已完成。GitHub 托管 CI 定义见 `.github/workflows/check.yml`，实际执行结果以对应提交的 Actions 检查为准。
+状态查询仅返回 `uninitialized`、`initialized` 或 `storage_error`，禁止缓存且不泄露目录、账户或凭证。未初始化与存储异常不开放业务写入。主动退出/密码重置（#8）、消息、文件、Android 及正式发布尚未实现；初始化成功不代表整个 Spec 001 已完成。GitHub 托管 CI 定义见 `.github/workflows/check.yml`，实际执行结果以对应提交的 Actions 检查为准。
 
 ## 工具链与本地检查
 
@@ -109,13 +109,29 @@ docker compose --env-file .env -f deploy/compose.dev.yml exec backend \
 
 跨目录操作不是原子的。发生部分失败时保留残留并报告部分完成，**不要删除、覆盖或盲目重试**；先停止相关操作并人工核对两个目标目录。没有自动恢复、清库或密码重置入口（重置属于 #8）。目前状态检查是诊断，不代替后续业务写入在使用存储时的验证。
 
-Argon2id 当前采用依赖默认参数（v0.6：m=19456 KiB、t=2、p=1），初始化一次约需 19 MiB 算法内存。登录并发预算与生产性能测量属于 #7，不能将初始化耗时当作登录容量保证。
+### 登录与会话（#7）
+
+登录接口只接受配置的精确 HTTPS Origin 和 JSON，体积上限 8 KiB；用户名规则及密码规则与初始化一致。成功返回 `expires_at`、`server_time`（Unix 秒），设置 host-only `__Host-filehop` Cookie（Secure、HttpOnly、SameSite=Lax、Path=/、Max-Age=43200）。数据库只保存 SHA-256 凭证摘要及固定到期时间；读取不续期，重启不撤销。认证响应禁止缓存，应用 401 使用 `session_invalid` 或 `invalid_credentials` 区分；页面不会把外层错误或网络错误当作注销。登录结果未知先查询会话，只在确认未认证后允许再次登录。
+
+`serve` 接受 `FILEHOP_ORIGIN` / `--origin` 及 `FILEHOP_TRUSTED_PROXY` / `--trusted-proxy`。Compose 从开发域名生成 Origin，并要求操作者填写 Caddy 在专用网络上的**精确、稳定 IP**。Caddy 示例覆盖 `X-FileHop-Client-IP` 为直接连接来源；后端只在 TCP 对端匹配该 IP 时读取该单地址头，其他对端只按 TCP 地址节流，忽略 XFF。不能填写整个网段或默认信任所有内网客户端；Caddy 地址变化须同步配置。额外 CDN/上游代理不在此默认信任链内，接入前另行核实。不配置代理时适用于直连回环测试，不是公网代理验收。
+
+失败节流：每来源滚动 900 秒最多 10 次失败，在途验证预占次数；全局最多 2 次密码验证，无等待队列，过载返回 429 和 Retry-After。来源表最多 4096 项，满后拒绝新来源而不驱逐旧计数；失败计数可随重启清空。未知用户名执行相同 Argon2id 验证。后台验证任务持有并发槽直到结束，不因客户端断开提前释放。页面尊重登录 Retry-After；错误及节流不会记录密码或凭证。
+
+Argon2id 使用 v0.6 默认参数 m=19456 KiB、t=2、p=1，双验证算法内存预算 38 MiB。2026-09-21 在本开发 VPS（aarch64、4 vCPU Neoverse-N1）通过真实临时 SQLite 的 release HTTP interface 测量：5 次单登录为 34/32/32/32/32 ms，两个同时登录共 35 ms，测试进程 `/proc/self/status` 峰值 VmHWM 为 45132 KiB。该数包含测试进程和初始化，不是纯算法 RSS，也不承诺生产负载下耗时；部署仍应留出 SQLite、运行时和其他业务空间。重现命令：
+
+```bash
+cargo test --release --manifest-path backend/Cargo.toml --test session_process measure_login_budget -- --ignored --nocapture
+```
+
+本轮整理尚未进入 main 的 `0001_next_release.sql`，加入会话存储。旧开发实例不会自动迁移；当前无升级命令，已有需保留的数据不得通过重新 init 处理。可丢弃开发实例也须由操作者明确授权并核对两个目录后再重建，本任务未清理任何既有实例。
+
+验收映射：`backend/tests/session.rs` 覆盖固定时间、Origin/格式、节流/过载和凭证磁盘保护；`session_process.rs` 使用 SIGKILL 后重启验证有效会话保留（S001-A15 会话部分）；Playwright 连接真实后端验证 Cookie、刷新恢复、外层 401、到期隐藏、迟到读取和登录响应丢失（S001-A08/A14 的当前切片）。尚无文本草稿/消息接口，其相关验收留待文本票；退出及撤销属于 #8。回环 localhost 的 Chromium 安全上下文不等于真实 HTTPS、稳定版 Chrome 或 Caddy 信任链验收，后者由 #13 完成。
 
 ## 安全与交付限制
 
 - `.env`、`secrets/`、开发数据、数据库及本地 Caddy 配置由 Git 与 Docker 构建上下文排除；示例只含占位值。
 - 前端不能包含运行密钥；不要把密码放入 `VITE_*` 环境变量。
-- 当前不记录请求正文、密码或凭证；仅持久化实例标识与账户哈希。Compose 配置容器日志轮转。
+- 当前不记录请求正文、密码或凭证；仅持久化实例标识、账户哈希及会话摘要/到期时间。Compose 配置容器日志轮转。
 - 当前容器配置为开发骨架，不是 Spec 004 生产产物或完整安全验收。
 - 真实稳定版 Chrome、HTTPS/Basic Auth/WSS 由 #13 验证；本地 Chromium、隔离容器及静态配置检查不能代替这些验证。
 

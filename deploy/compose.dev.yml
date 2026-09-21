@@ -6,6 +6,9 @@ services:
       context: ..
       dockerfile: deploy/backend.Dockerfile
     init: true
+    environment:
+      FILEHOP_ORIGIN: https://${FILEHOP_DEV_HOST:?Set the exact development hostname}
+      FILEHOP_TRUSTED_PROXY: ${FILEHOP_TRUSTED_PROXY:?Set the exact controlled Caddy IP}
     volumes:
       - type: bind
         source: ../data-dev/database
