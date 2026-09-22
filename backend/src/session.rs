@@ -61,6 +61,7 @@ pub(crate) struct Service {
 pub fn router(database: PathBuf, files: PathBuf, config: Config) -> Router {
     Router::new()
         .route("/api/session", get(current).post(login).delete(logout))
+        .route("/api/sends/{send_id}", get(crate::messages::result))
         .route(
             "/api/messages",
             get(crate::messages::recent).post(crate::messages::send),
