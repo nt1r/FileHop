@@ -13,6 +13,13 @@ Track implementation tasks, bugs, and proposals in GitHub Issues for
 - Move a Spec's authority to an issue only with explicit agreement, and
   update repository references to avoid parallel authoritative copies.
 
+## Public Content
+
+Before creating or updating bodies, comments, or linked evidence, apply the
+[public content checklist](../../CONTRIBUTING.md#public-content-checklist).
+Issues and PRs are public: summarize project behavior and results, not private
+machine inspection. User-provided diagnostics are not publication consent.
+
 ## Updating Existing Issues: Body First
 
 For an authorized issue update, edit the existing issue body by default.

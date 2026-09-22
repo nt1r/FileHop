@@ -88,7 +88,7 @@
 
 退出标准：
 
-- `https://transfer.hammerbilly.top` 提供桌面 Web、同域 API 和认证文件访问。
+- `https://filehop.hammerbilly.top` 提供桌面 Web、同域 API 和认证文件访问。
 - 共享 Caddy 提供静态资源及内部反向代理，HTTPS 和证书自动管理兼容公网仅 TCP 443 的约束，不承诺 HTTP 跳转。
 - GitHub 托管 CI 从受控 main 版本 tag 构建并发布 ARM64 产物至 GHCR，VPS 手动脚本部署；dev/main 分支保护生效，失败人工处理，不提供自动回滚。
 - 后端无直接公网端口，SQLite 无独立数据库容器。

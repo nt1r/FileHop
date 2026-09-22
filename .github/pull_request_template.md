@@ -6,7 +6,10 @@ including its rules for pending manual acceptance checks. -->
 
 ## Evidence
 
-<!-- Checks actually run and their results; note anything not tested. Add before/after evidence when useful. -->
+<!-- Checks actually run and their results; note anything not tested. Add before/after evidence when useful.
+Before publishing, apply CONTRIBUTING.md's public content checklist: summarize evidence;
+omit unrelated host software, real topology, personal paths/device details, and secrets.
+Diagnostics or deployment authorization are not permission to publish environment details. -->
 
 ## Merge Danger
 

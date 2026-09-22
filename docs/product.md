@@ -21,7 +21,7 @@ FileHop 是轻量、自托管、面向个人的跨设备文本与文件交换工
 - Android 首次配置单个 HTTPS 域名根地址，默认正式域名；确认后不提供应用内切换，更换需清除应用数据并重新配置，会删除应用管理的本地副本。不做多服务器归属或实例检测、HTTP 或证书校验绕过。
 - Android 使用 GitHub Release 签名 APK 手动安装更新；正式版保持稳定签名，开发版独立 application ID，数据隔离。
 - 初始负载为少量设备并发，日常文本与文件交换。
-- Web 仅承诺验收时最新稳定版桌面 Chrome，记录实际测试版本，不承诺其他浏览器或所有桌面操作系统组合。Android 最低支持 Android 10（API 29），至少验收最低版本及一个较新版本。
+- Web 仅承诺验收时最新稳定版桌面 Chrome，实际版本保留在私有验收证据中，公开仅记录兼容类别和结果；不承诺其他浏览器或所有桌面操作系统组合。Android 最低支持 Android 10（API 29），至少验收最低版本及一个较新版本。
 
 ## 3. 消息流与文本
 
@@ -145,13 +145,13 @@ FileHop 是轻量、自托管、面向个人的跨设备文本与文件交换工
 | 部署 | Docker Compose |
 | 公网入口 | Caddy，自动 HTTPS、证书管理，仅开放公网 TCP 443，不承诺 HTTP 跳转 |
 
-- 正式域名：`https://transfer.hammerbilly.top`。
+- 正式域名：`https://filehop.hammerbilly.top`。
 - 公网 Web 入站通过 Oracle Cloud 网络规则仅开放 TCP 443，不开放 80，不要求修改宿主防火墙或既有 SSH 管理入口；仍须验证端口映射与实际网络可达性。
 - 开发和生产同 VPS、独立应用栈及数据，共享独立 Caddy 入口。所有 CI 检查和发布构建使用 GitHub 托管 runner，不使用 VPS self-hosted runner。
 - 仓库决定公开；默认分支为受保护的 dev，个人分支经 PR 进入 dev，仅本仓库 dev 可经 PR 合并至受保护的发布分支 main。版本 tag 触发产物构建并保存至 GHCR；生产由操作者在 VPS 手动执行脚本部署，Actions 不主动连接 VPS。
 - 允许短暂维护窗口；部署失败人工处理，不承诺自动回滚。仓库公开前须检查完整历史中的敏感信息并落实 Apache License 2.0（Apache-2.0）许可；GHCR 后端镜像与前端静态制品决定公开，运行密钥与用户数据不得进入发布产物。
 - Web、`/api/*` 和 `/api/files/*` 同域访问。
-- Caddy 提供 React 构建产物，并通过内部网络反向代理到 `backend:8080`。
+- Caddy 提供 React 构建产物，并通过内部网络反向代理到后端；应用网络内服务名为 `backend:8080`，宿主入口可使用专用网络固定内部地址。独立入口可采用宿主服务，不与其他工具管理的 Caddy 混用配置或生命周期。
 - 后端监听 `0.0.0.0:8080`。
 - 容器内部数据库路径：`/data/database/transfer.db`。
 - 容器内部文件目录：`/data/files`。
@@ -159,7 +159,7 @@ FileHop 是轻量、自托管、面向个人的跨设备文本与文件交换工
 - 开发宿主目录使用 `data-dev/database`、`data-dev/files`，不得与生产混用或提交开发数据。
 - 生产可使用 `/opt/transfer/data/database`、`/opt/transfer/data/files` 挂载；应用不感知宿主路径。
 - 通过挂载、配置、域名和密钥区分环境；生产不强制存在独立的前端运行容器。
-- 开发者远程连接作为开发机的 VPS；使用独立的 `transfer-dev` 开发域名，完整域名待配置。Caddy 管理证书和 HTTPS，浏览器仅访问同域 443，前端开发服务及后端通过内部网络接受反向代理。热更新若使用 WebSocket，同样经同域 WSS 443，不属于业务消息同步。
+- 开发者远程连接作为开发机的 VPS；使用独立开发域名 `filehop-dev.hammerbilly.top`；域名已确认不代表 DNS 或接入已经配置。Caddy 管理证书和 HTTPS，浏览器仅访问同域 443，前端开发服务及后端通过内部网络接受反向代理。热更新若使用 WebSocket，同样经同域 WSS 443，不属于业务消息同步。
 
 ## 9. 运维与风险边界
 

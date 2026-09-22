@@ -60,6 +60,14 @@ The development machine is a VPS that may also host production. Treat repository
 - Preserve existing remote-management access. Inspect environment configuration without printing secret values.
 - Report external actions separately from local edits; a documented plan must not be presented as an applied setting.
 
+## Public-Repository Privacy
+
+- Treat tracked files, commit messages, Issues/PRs (including comments), CI logs, and artifacts as public. Access to a machine or user-supplied diagnostics is not permission to publish those details.
+- Publish minimal project-relevant contracts and verification conclusions. Exclude unrelated installed software/services, actual host addresses or private topology, personal usernames/paths, and device fingerprints. Use placeholders, reserved example addresses, and generic environment categories; publish specific environment details only with explicit approval for that public use.
+- Keep private operational notes outside the repository and public tracker. Redact screenshots, traces, and command output before publishing; inspection and deployment authorization do not imply disclosure authorization.
+- Before committing, pushing, or updating public text, inspect the complete diff and outgoing text for privacy, including documentation and comments—not just credentials. Follow the checklist in [CONTRIBUTING.md](CONTRIBUTING.md#public-content-checklist).
+- If exposure occurs, sanitize current files and public descriptions without repeating the details. Report historical exposure separately: a deletion commit does not erase history. Obtain explicit authorization before rewriting history or force-pushing; never claim cached copies or clones have been purged.
+
 ## Completion Reporting
 
 - Summarize changed behavior and relevant file paths.

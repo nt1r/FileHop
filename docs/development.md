@@ -89,6 +89,8 @@ bash tests/web_container_smoke.sh
 
 浏览器访问 `https://<开发域名>`，先通过开发外层认证。HMR 经同域 WSS 443，源文件只读挂载供热更新；依赖变更需重新构建。Compose 不发布前后端端口，Caddy 不挂载数据库或文件目录。
 
+使用独立宿主入口时，按[宿主入口指南](host-ingress.md)配置 Compose overlay 和独立服务，不直接套用容器 Caddy 网络示例。开发入口验证结论见 [#13 记录](verification-issue-13.md)。
+
 **以上是操作说明，不代表网络、域名、Caddy 或真实账户已经配置。** 普通运行不会创建数据库或账户，不能用 `sqlx database create` 代替显式初始化。
 
 迁移编号、`main` 冻结、checksum、开发数据与发布关联规则见[数据库迁移维护规则](../backend/migrations/README.md)。已有实例的独立升级命令尚未实现，不能用 `init` 代替升级。
@@ -117,7 +119,7 @@ docker compose --env-file .env -f deploy/compose.dev.yml exec backend \
 
 失败节流：每来源滚动 900 秒最多 10 次失败，在途验证预占次数；全局最多 2 次密码验证，无等待队列，过载返回 429 和 Retry-After。来源表最多 4096 项，满后拒绝新来源而不驱逐旧计数；失败计数可随重启清空。未知用户名执行相同 Argon2id 验证。后台验证任务持有并发槽直到结束，不因客户端断开提前释放。页面尊重登录 Retry-After；错误及节流不会记录密码或凭证。
 
-Argon2id 使用 v0.6 默认参数 m=19456 KiB、t=2、p=1，双验证算法内存预算 38 MiB。2026-09-21 在本开发 VPS（aarch64、4 vCPU Neoverse-N1）通过真实临时 SQLite 的 release HTTP interface 测量：5 次单登录为 34/32/32/32/32 ms，两个同时登录共 35 ms，测试进程 `/proc/self/status` 峰值 VmHWM 为 45132 KiB。该数包含测试进程和初始化，不是纯算法 RSS，也不承诺生产负载下耗时；部署仍应留出 SQLite、运行时和其他业务空间。重现命令：
+Argon2id 使用 v0.6 默认参数 m=19456 KiB、t=2、p=1，双验证算法内存预算 38 MiB。部署时须在目标环境测量验证延迟和进程内存，并为 SQLite、运行时及其他业务保留资源；不要将某台开发机器的测量结果作为性能承诺。测量命令：
 
 ```bash
 cargo test --release --manifest-path backend/Cargo.toml --test session_process measure_login_budget -- --ignored --nocapture
@@ -166,7 +168,7 @@ docker compose --env-file .env -f deploy/compose.dev.yml exec backend \
 - 前端不能包含运行密钥；不要把密码放入 `VITE_*` 环境变量。
 - 当前不记录请求正文、密码或凭证；持久化实例标识、账户哈希、会话摘要/到期时间及已提交消息和发送标识。Compose 配置容器日志轮转。
 - 当前容器配置为开发骨架，不是 Spec 004 生产产物或完整安全验收。
-- 真实稳定版 Chrome、HTTPS/Basic Auth/WSS 由 #13 验证；本地 Chromium、隔离容器及静态配置检查不能代替这些验证。
+- 真实稳定版 Chrome、HTTPS/Basic Auth/WSS 由 #13 跟踪；已完成部分真实域名验证，见[核查记录](verification-issue-13.md)。本地 Chromium、隔离容器及静态配置检查不能代替完整人工验收。
 
 ## 官方参考
 
