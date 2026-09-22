@@ -45,7 +45,7 @@ Before domain exploration or decision changes, read [docs/agents/domain.md](docs
 3. Inspect existing build configuration and scripts before choosing commands or introducing tooling. If a command or capability is missing, report that rather than claiming it exists.
 4. Implement and verify one coherent behavior at a time. Keep later-stage features outside the current slice unless requested.
 5. Use the testing principles to cover risk at appropriate boundaries; avoid coupling tests to private implementation structure.
-6. Check the resulting diff and any documentation affected by the change.
+6. Check the resulting diff and any documentation affected by the change. Keep ticket progress and validation summaries in Issues/PRs/CI; integrate durable instructions into existing guides or Specs. Do not add per-ticket report files. Follow the explicit exceptions in [docs/testing.md](docs/testing.md#5-与-spec-的对应及完成判定), and remove temporary reports and stale links before submission.
 
 For reviews, report concrete findings with file references, consequences, and recommended fixes. Distinguish contract violations from optional improvements. A review request alone does not authorize edits or deployment.
 

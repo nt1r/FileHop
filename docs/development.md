@@ -110,7 +110,7 @@ dev/main 的 push 基础检查不构建镜像，因此不会刷新对应分支�
 
 浏览器访问 `https://<开发域名>`，先通过开发外层认证。HMR 经同域 WSS 443，源文件只读挂载供热更新；依赖变更需重新构建。Compose 不发布前后端端口，Caddy 不挂载数据库或文件目录。
 
-使用独立宿主入口时，按[宿主入口指南](host-ingress.md)配置 Compose overlay 和独立服务，不直接套用容器 Caddy 网络示例。开发入口验证结论见 [#13 记录](verification-issue-13.md)。
+使用独立宿主入口时，按[宿主入口指南](host-ingress.md)配置 Compose overlay 和独立服务，不直接套用容器 Caddy 网络示例。开发入口验收证据见 [Issue #13](https://github.com/nt1r/FileHop/issues/13)。
 
 **以上是操作说明，不代表网络、域名、Caddy 或真实账户已经配置。** 普通运行不会创建数据库或账户，不能用 `sqlx database create` 代替显式初始化。
 
@@ -189,7 +189,7 @@ docker compose --env-file .env -f deploy/compose.dev.yml exec backend \
 - 前端不能包含运行密钥；不要把密码放入 `VITE_*` 环境变量。
 - 当前不记录请求正文、密码或凭证；持久化实例标识、账户哈希、会话摘要/到期时间及已提交消息和发送标识。Compose 配置容器日志轮转。
 - 当前容器配置为开发骨架，不是 Spec 004 生产产物或完整安全验收。
-- 真实稳定版 Chrome、HTTPS/Basic Auth/WSS 由 #13 跟踪；已完成部分真实域名验证，见[核查记录](verification-issue-13.md)。本地 Chromium、隔离容器及静态配置检查不能代替完整人工验收。
+- 开发入口的真实 HTTPS/Basic Auth/WSS 及稳定版 Chrome 访问验证见 [Issue #13](https://github.com/nt1r/FileHop/issues/13)；后续业务路由变化仍需回归。本地 Chromium、隔离容器及静态配置检查不能代替完整人工验收。
 
 ## 官方参考
 
