@@ -1,0 +1,30 @@
+[Unit]
+Description=FileHop independent HTTPS ingress
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+User=filehop-caddy
+Group=filehop-caddy
+Environment=HOME=/var/lib/filehop-caddy
+Environment=XDG_DATA_HOME=/var/lib/filehop-caddy
+Environment=XDG_CONFIG_HOME=/var/lib/filehop-caddy/config
+# 不使用 --environ，避免启动日志打印外层密码哈希。
+ExecStart=/opt/filehop-caddy/caddy run --config /etc/filehop-caddy/Caddyfile --adapter caddyfile --envfile /etc/filehop-caddy/ingress.env
+# admin off 下先验证再重读配置；更改环境文件须 restart，不能假定信号刷新进程环境。
+ExecReload=/opt/filehop-caddy/caddy validate --config /etc/filehop-caddy/Caddyfile --adapter caddyfile --envfile /etc/filehop-caddy/ingress.env
+ExecReload=/bin/kill -USR1 $MAINPID
+StateDirectory=filehop-caddy
+UMask=0077
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+
+[Install]
+WantedBy=multi-user.target

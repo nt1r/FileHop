@@ -1,0 +1,10 @@
+# 与 compose.dev.yml 合并；宿主入口通过专用网络固定地址连接，不发布应用端口。
+services:
+  backend:
+    networks:
+      ingress:
+        ipv4_address: ${FILEHOP_BACKEND_IP:?Set the dedicated backend IP}
+  web:
+    networks:
+      ingress:
+        ipv4_address: ${FILEHOP_WEB_IP:?Set the dedicated web IP}
