@@ -50,10 +50,10 @@ struct Attempts {
     failures: VecDeque<i64>,
     pending: usize,
 }
-struct Service {
+pub(crate) struct Service {
     database: PathBuf,
     files: PathBuf,
-    config: Config,
+    pub(crate) config: Config,
     verification: Arc<Semaphore>,
     attempts: Mutex<HashMap<IpAddr, Attempts>>,
 }
@@ -61,6 +61,10 @@ struct Service {
 pub fn router(database: PathBuf, files: PathBuf, config: Config) -> Router {
     Router::new()
         .route("/api/session", get(current).post(login).delete(logout))
+        .route(
+            "/api/messages",
+            get(crate::messages::recent).post(crate::messages::send),
+        )
         .with_state(Arc::new(Service {
             database,
             files,
@@ -70,7 +74,7 @@ pub fn router(database: PathBuf, files: PathBuf, config: Config) -> Router {
         }))
 }
 
-fn error(status: StatusCode, code: &str, message: &str) -> Response {
+pub(crate) fn error(status: StatusCode, code: &str, message: &str) -> Response {
     (
         status,
         [(header::CACHE_CONTROL, "no-store")],
@@ -78,7 +82,7 @@ fn error(status: StatusCode, code: &str, message: &str) -> Response {
     )
         .into_response()
 }
-fn unavailable() -> Response {
+pub(crate) fn unavailable() -> Response {
     error(
         StatusCode::SERVICE_UNAVAILABLE,
         "unavailable",
@@ -146,7 +150,7 @@ impl Service {
     }
 }
 
-fn write_origin_allowed(service: &Service, headers: &HeaderMap) -> bool {
+pub(crate) fn write_origin_allowed(service: &Service, headers: &HeaderMap) -> bool {
     headers.get_all(header::ORIGIN).iter().count() == 1
         && headers.get(header::ORIGIN).and_then(|v| v.to_str().ok())
             == Some(service.config.origin.as_str())
@@ -203,9 +207,12 @@ async fn logout(State(service): State<Arc<Service>>, headers: HeaderMap) -> Resp
         .into_response()
 }
 
-async fn current(State(service): State<Arc<Service>>, headers: HeaderMap) -> Response {
+pub(crate) async fn authenticate(
+    service: &Service,
+    headers: &HeaderMap,
+) -> Result<(SqliteConnection, i64), Box<Response>> {
     if headers.contains_key(header::AUTHORIZATION) {
-        return unauthorized();
+        return Err(Box::new(unauthorized()));
     }
     let tokens: Vec<_> = headers
         .get_all(header::COOKIE)
@@ -215,12 +222,9 @@ async fn current(State(service): State<Arc<Service>>, headers: HeaderMap) -> Res
         .filter_map(|part| part.trim().strip_prefix(&format!("{COOKIE}=")))
         .collect();
     if tokens.len() != 1 || tokens[0].len() != 64 {
-        return unauthorized();
+        return Err(Box::new(unauthorized()));
     }
-    let mut connection = match service.connection().await {
-        Ok(c) => c,
-        Err(e) => return *e,
-    };
+    let mut connection = service.connection().await?;
     let now = (service.config.now)();
     match sqlx::query_scalar::<_, i64>(
         "SELECT expires_at FROM session WHERE digest = ? AND expires_at > ?",
@@ -230,9 +234,16 @@ async fn current(State(service): State<Arc<Service>>, headers: HeaderMap) -> Res
     .fetch_optional(&mut connection)
     .await
     {
-        Ok(Some(expires)) => session_response(expires, now),
-        Ok(None) => unauthorized(),
-        Err(_) => unavailable(),
+        Ok(Some(expires)) => Ok((connection, expires)),
+        Ok(None) => Err(Box::new(unauthorized())),
+        Err(_) => Err(Box::new(unavailable())),
+    }
+}
+
+async fn current(State(service): State<Arc<Service>>, headers: HeaderMap) -> Response {
+    match authenticate(&service, &headers).await {
+        Ok((_, expires)) => session_response(expires, (service.config.now)()),
+        Err(response) => *response,
     }
 }
 

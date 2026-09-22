@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Button } from '@cloudflare/kumo/components/button'
+import Messages from './Messages'
+import { useMessages } from './messages'
 
 type Session = { expires_at: number; server_time: number }
 type Phase = 'checking' | 'login' | 'authenticated' | 'unknown' | 'logout-pending'
@@ -58,6 +60,7 @@ export default function SessionPage() {
   const channel = useRef<BroadcastChannel | null>(null)
   const deadline = useRef<number | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const exchange = useMessages(phase === 'authenticated', expire)
 
   useEffect(() => {
     const remaining = retryAt - Date.now()
@@ -70,6 +73,7 @@ export default function SessionPage() {
   function clearForLogout(notice: LogoutNotice) {
     // 通知只存在于当前打开的页面，不写持久化锁。先废弃所有在途回调，
     // 再清空页面；即使 Cookie 仍有效，也不能通过前台恢复或迟到响应重现内容。
+    exchange.suspend(true)
     generation.current++
     logoutPending.current = notice === 'logout-pending'
     deadline.current = null
@@ -83,6 +87,7 @@ export default function SessionPage() {
       : '已退出 FileHop 登录。此操作不会清除浏览器的外层 Basic Auth。')
   }
   async function logout() {
+    if (exchange.hasUnsaved() && !window.confirm('有未保存正文或未确认发送。退出将清空当前页面，原消息仍可能已保存。确认退出？')) return
     clearForLogout('logout-pending')
     channel.current?.postMessage('logout-pending')
     const version = generation.current
@@ -103,6 +108,7 @@ export default function SessionPage() {
 
   function expire() {
     // 先使在途读取失效，再隐藏受保护内容；旧响应不能把页面带回已登录状态。
+    exchange.suspend(false)
     generation.current++
     deadline.current = null
     clearTimeout(timer.current)
@@ -132,6 +138,7 @@ export default function SessionPage() {
     } catch (error) {
       if (version !== generation.current) return
       if (error instanceof ApplicationError && error.code === 'session_invalid') {
+        exchange.suspend(false)
         deadline.current = null
         clearTimeout(timer.current)
         setPhase('login')
@@ -207,7 +214,7 @@ export default function SessionPage() {
 
   return <section>
     <p role="status">{message}</p>
-    {phase === 'authenticated' && <section aria-label="消息流"><h2>消息流</h2><p>暂无消息。文本发送将在后续任务开放。</p></section>}
+    {phase === 'authenticated' && <Messages exchange={exchange} />}
     {phase === 'login' && <form onSubmit={login}>
       <label>用户名<input autoComplete="username" value={username} onChange={e => setUsername(e.target.value)} required /></label>
       <label>密码<input type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} required /></label>

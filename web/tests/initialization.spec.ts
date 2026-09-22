@@ -3,8 +3,10 @@ import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { verifyLogout } from './logout'
+import { verifyMessages, verifyMessageSafety } from './messages'
 
 test('administrator initializes storage and the page observes the real status', async ({ page }) => {
+  test.setTimeout(90_000)
   await page.clock.install()
   await page.goto('/')
   await expect(page.getByRole('status')).toContainText('请管理员先初始化')
@@ -73,6 +75,8 @@ test('administrator initializes storage and the page observes the real status', 
   await expect(page.getByRole('region', { name: '消息流' })).toBeVisible()
   expect(posts).toBe(1)
   await page.unroute('**/api/session')
+  await verifyMessages(page)
+  await verifyMessageSafety(page)
   await verifyLogout(page)
   writeFileSync(resolve(process.env.TEST_FILES!, 'storage-id'), 'mismatched')
   await page.reload()
