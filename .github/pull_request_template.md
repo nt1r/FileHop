@@ -7,11 +7,8 @@ including its rules for pending manual acceptance checks. -->
 ## Evidence
 
 <!-- Checks actually run and their results; note anything not tested. Add before/after evidence when useful.
-Keep ticket-specific evidence here or in the Issue/CI, not a new repository report;
-merge durable guidance into existing docs and remove temporary reports/stale links.
-Before publishing, apply CONTRIBUTING.md's public content checklist: summarize evidence;
-omit unrelated host software, real topology, personal paths/device details, and secrets.
-Diagnostics or deployment authorization are not permission to publish environment details. -->
+Before publishing, apply CONTRIBUTING.md#public-content-checklist.
+For evidence placement and permanent-record exceptions, follow docs/testing.md section 5. -->
 
 ## Merge Danger
 

@@ -16,9 +16,8 @@ Track implementation tasks, bugs, and proposals in GitHub Issues for
 ## Public Content
 
 Before creating or updating bodies, comments, or linked evidence, apply the
-[public content checklist](../../CONTRIBUTING.md#public-content-checklist).
-Issues and PRs are public: summarize project behavior and results, not private
-machine inspection. User-provided diagnostics are not publication consent.
+[public content checklist](../../CONTRIBUTING.md#public-content-checklist) and
+[evidence placement rules](../testing.md#5-与-spec-的对应及完成判定).
 
 ## Updating Existing Issues: Body First
 

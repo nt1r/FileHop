@@ -12,15 +12,13 @@ See the [development guide](docs/development.md) for toolchains, build/test comm
 
 ## Public content checklist
 
-Before committing, pushing, or publishing an Issue/PR or artifact:
+Treat tracked files, commit messages, Issue/PR bodies and comments, CI logs, and artifacts as public. Before committing, pushing, publishing, or handling an exposure:
 
 1. Review the complete diff and outgoing text, including docs, comments, screenshots, traces, and logs. Check both secrets and identifying environment details.
-2. Retain only facts needed to explain FileHop behavior, reproduce a test, or operate a generic deployment. Replace host-specific addresses/topology and personal paths with placeholders; summarize device testing without publishing a personal device inventory.
+2. Retain only facts needed to explain FileHop behavior, reproduce a test, or operate a generic deployment. Replace host-specific addresses/topology and personal usernames/paths with placeholders or reserved example addresses; use generic environment categories instead of device fingerprints. Redact screenshots, traces, and command output before publishing.
 3. Keep unrelated host software and services out of public material. Permission to inspect or deploy, and diagnostics supplied in conversation, are not permission to publish them. Ask before publishing a necessary specific environment detail.
-4. Record evidence as behavior → result → limitation in Issues/PRs/CI, not a transcript or a per-ticket repository report. Integrate durable guidance into existing docs; see [testing principles](docs/testing.md#5-与-spec-的对应及完成判定) for exceptional permanent records. Remove temporary reports and stale links before submitting. Keep private runbooks outside the repository.
-5. If something was already published, sanitize current public surfaces and report which history remains. History rewriting/force-pushing requires explicit authorization and cannot guarantee removal from caches or clones.
-
-See [AGENTS.md](AGENTS.md#public-repository-privacy) for the agent guardrails. Do not use a list of previously exposed real values as a committed regression fixture.
+4. Keep private operational notes outside the repository and public tracker. Before choosing where to record evidence or durable guidance, follow the [evidence placement rules](docs/testing.md#5-与-spec-的对应及完成判定).
+5. If something was already published, sanitize current public surfaces without repeating the exposed details, and report which history remains: deletion commits do not erase history. History rewriting/force-pushing requires explicit authorization and cannot guarantee removal from caches or clones. Do not commit previously exposed real values as regression fixtures.
 
 Workflows check PR branch policy and run application builds, static checks, real-storage tests, browser smoke, shell syntax, and Compose configuration validation on GitHub-hosted runners. Development PRs additionally build test images and run isolated container smoke when container, dependency, toolchain, build configuration, migration, or CI/test orchestration paths change. PRs into `main` always run those container checks; pushes to `dev`/`main` run the base checks only. Manual Application checks runs include the full container checks. See the [development guide](docs/development.md#github-actions-检查分层) for selection details and limitations.
 

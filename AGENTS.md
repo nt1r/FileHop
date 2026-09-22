@@ -45,7 +45,7 @@ Before domain exploration or decision changes, read [docs/agents/domain.md](docs
 3. Inspect existing build configuration and scripts before choosing commands or introducing tooling. If a command or capability is missing, report that rather than claiming it exists.
 4. Implement and verify one coherent behavior at a time. Keep later-stage features outside the current slice unless requested.
 5. Use the testing principles to cover risk at appropriate boundaries; avoid coupling tests to private implementation structure.
-6. Check the resulting diff and any documentation affected by the change. Keep ticket progress and validation summaries in Issues/PRs/CI; integrate durable instructions into existing guides or Specs. Do not add per-ticket report files. Follow the explicit exceptions in [docs/testing.md](docs/testing.md#5-与-spec-的对应及完成判定), and remove temporary reports and stale links before submission.
+6. Check the resulting diff and affected documentation. Before adding reports or recording completion evidence, follow the [evidence placement rules](docs/testing.md#5-与-spec-的对应及完成判定).
 
 For reviews, report concrete findings with file references, consequences, and recommended fixes. Distinguish contract violations from optional improvements. A review request alone does not authorize edits or deployment.
 
@@ -62,11 +62,7 @@ The development machine is a VPS that may also host production. Treat repository
 
 ## Public-Repository Privacy
 
-- Treat tracked files, commit messages, Issues/PRs (including comments), CI logs, and artifacts as public. Access to a machine or user-supplied diagnostics is not permission to publish those details.
-- Publish minimal project-relevant contracts and verification conclusions. Exclude unrelated installed software/services, actual host addresses or private topology, personal usernames/paths, and device fingerprints. Use placeholders, reserved example addresses, and generic environment categories; publish specific environment details only with explicit approval for that public use.
-- Keep private operational notes outside the repository and public tracker. Redact screenshots, traces, and command output before publishing; inspection and deployment authorization do not imply disclosure authorization.
-- Before committing, pushing, or updating public text, inspect the complete diff and outgoing text for privacy, including documentation and comments—not just credentials. Follow the checklist in [CONTRIBUTING.md](CONTRIBUTING.md#public-content-checklist).
-- If exposure occurs, sanitize current files and public descriptions without repeating the details. Report historical exposure separately: a deletion commit does not erase history. Obtain explicit authorization before rewriting history or force-pushing; never claim cached copies or clones have been purged.
+Inspection or deployment authorization is not publication consent. Before committing, pushing, publishing tracker text or artifacts, or handling an exposure, read and apply the [public content checklist](CONTRIBUTING.md#public-content-checklist), the authoritative privacy procedure.
 
 ## Completion Reporting
 
