@@ -164,6 +164,7 @@ pub(crate) async fn result(
 #[serde(deny_unknown_fields)]
 pub(crate) struct RecentQuery {
     limit: Option<u32>,
+    before: Option<i64>,
 }
 
 pub(crate) async fn recent(
@@ -175,13 +176,17 @@ pub(crate) async fn recent(
         Ok(c) => c,
         Err(e) => return *e,
     };
-    let limit = match query {
-        Ok(Query(q)) if (1..=100).contains(&q.limit.unwrap_or(50)) => q.limit.unwrap_or(50),
+    let (limit, boundary) = match query {
+        Ok(Query(q))
+            if (1..=100).contains(&q.limit.unwrap_or(50)) && q.before.is_none_or(|id| id > 0) =>
+        {
+            (q.limit.unwrap_or(50), q.before)
+        }
         _ => {
             return error(
                 StatusCode::BAD_REQUEST,
                 "invalid_query",
-                "当前仅支持 limit 为 1–100 的最近页读取",
+                "limit 须为 1–100，before 须为有效正整数消息 ID；不支持其他查询参数",
             );
         }
     };
@@ -189,13 +194,25 @@ pub(crate) async fn recent(
         // 快照最大值和最近页同属一个读事务；期间的新提交留给独立的增量游标读取。
         let mut tx = connection.begin().await?;
         let cursor: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) FROM message").fetch_one(&mut *tx).await?;
-        let mut messages = sqlx::query_as::<_, Message>("SELECT CAST(id AS TEXT) AS id, send_id, text, source_label, created_at FROM message ORDER BY message.id DESC LIMIT ?").bind(limit + 1).fetch_all(&mut *tx).await?;
+        // 历史从排他边界向前取最近一页，多取一条判断是否还有旧记录；新增消息不会挤动旧页。
+        let mut messages = if let Some(before) = boundary {
+            sqlx::query_as::<_, Message>("SELECT CAST(id AS TEXT) AS id, send_id, text, source_label, created_at FROM message WHERE id < ? ORDER BY message.id DESC LIMIT ?")
+                .bind(before).bind(limit + 1).fetch_all(&mut *tx).await?
+        } else {
+            sqlx::query_as::<_, Message>("SELECT CAST(id AS TEXT) AS id, send_id, text, source_label, created_at FROM message ORDER BY message.id DESC LIMIT ?")
+                .bind(limit + 1).fetch_all(&mut *tx).await?
+        };
         let has_older = messages.len() > limit as usize;
         messages.truncate(limit as usize);
         messages.reverse();
         let before = messages.first().map(|m| m.id.clone());
         tx.commit().await?;
-        Ok(serde_json::json!({"messages":messages,"sync_cursor":cursor.to_string(),"before":before,"has_older":has_older}))
+        let mut page = serde_json::json!({"messages":messages,"before":before,"has_older":has_older});
+        // 只有首次快照建立新增读取基线；旧页不提供可误用为新增进度的游标。
+        if boundary.is_none() {
+            page["sync_cursor"] = cursor.to_string().into();
+        }
+        Ok(page)
     }.await;
     match result {
         Ok(value) => json(StatusCode::OK, value),
