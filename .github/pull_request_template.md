@@ -6,7 +6,9 @@ including its rules for pending manual acceptance checks. -->
 
 ## Evidence
 
-<!-- Checks actually run and their results; note anything not tested. Add before/after evidence when useful. -->
+<!-- Checks actually run and their results; note anything not tested. Add before/after evidence when useful.
+Before publishing, apply CONTRIBUTING.md#public-content-checklist.
+For evidence placement and permanent-record exceptions, follow docs/testing.md section 5. -->
 
 ## Merge Danger
 

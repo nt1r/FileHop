@@ -8,29 +8,8 @@ https://{$FILEHOP_DEV_HOST} {
 		}
 	}
 
-	route {
-		basic_auth {
-			{$FILEHOP_DEV_USER} {$FILEHOP_DEV_PASSWORD_HASH}
-		}
-		# The development gate is not application authentication.
-		request_header -Authorization
-		handle /api/* {
-			reverse_proxy filehop-dev-backend:8080 {
-				# 覆盖客户端同名头；后端只信任显式配置的 Caddy 内网 IP。
-				header_up X-FileHop-Client-IP {remote_host}
-			}
-		}
-		# Never expose internal liveness or future diagnostic routes.
-		handle /internal/* {
-			respond 404
-		}
-		handle {
-			reverse_proxy filehop-dev-web:5173
-		}
-	}
-
-	handle_errors {
-		header X-FileHop-Access-Layer development
-		respond "Development access layer error" {err.status_code}
-	}
+	# Set FILEHOP_BACKEND_UPSTREAM=filehop-dev-backend:8080 and
+	# FILEHOP_WEB_UPSTREAM=filehop-dev-web:5173 for container ingress.
+	# Install caddy-dev.routes beside this file; host ingress uses fixed private IPs.
+	import caddy-dev.routes
 }

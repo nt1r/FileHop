@@ -1,0 +1,26 @@
+# 页面、源码和热更新握手都必须先通过独立外层认证；应用登录不能保护开发服务器。
+route {
+	basic_auth {
+		{$FILEHOP_DEV_USER} {$FILEHOP_DEV_PASSWORD_HASH}
+	}
+	# 外层凭证只交给入口验证，不进入应用认证逻辑或上游日志。
+	request_header -Authorization
+	handle /api/* {
+		reverse_proxy {$FILEHOP_BACKEND_UPSTREAM} {
+			# 覆盖伪造来源；后端还须核对 TCP 对端是配置的精确代理地址。
+			header_up X-FileHop-Client-IP {remote_host}
+		}
+	}
+	handle /internal/* {
+		respond 404
+	}
+	handle {
+		reverse_proxy {$FILEHOP_WEB_UPSTREAM}
+	}
+}
+handle_errors {
+	# 外层拒绝不是应用会话到期；客户端须保留草稿和未知发送状态。
+	header X-FileHop-Access-Layer development
+	header Cache-Control no-store
+	respond "Development access layer error" {err.status_code}
+}
