@@ -4,6 +4,7 @@ import { writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { verifyLogout } from './logout'
 import { verifyMessages, verifyMessageSafety } from './messages'
+import { verifySendRecovery } from './send-recovery'
 
 test('administrator initializes storage and the page observes the real status', async ({ page }) => {
   test.setTimeout(90_000)
@@ -77,6 +78,7 @@ test('administrator initializes storage and the page observes the real status', 
   await page.unroute('**/api/session')
   await verifyMessages(page)
   await verifyMessageSafety(page)
+  await verifySendRecovery(page)
   await verifyLogout(page)
   writeFileSync(resolve(process.env.TEST_FILES!, 'storage-id'), 'mismatched')
   await page.reload()

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 export type Message = { id: string; send_id: string; text: string; source_label: string; created_at: string }
-type Attempt = { send_id: string; text: string; source_label: string; state: 'sending' | 'unknown' }
+type Attempt = { send_id: string; text: string; source_label: string; state: 'sending' | 'unknown' | 'checking'; uncertain?: boolean }
 type Model = { draft: string; attempt: Attempt | null; messages: Message[]; syncCursor: string | null; notice: string; reading: boolean }
 const unknownNotice = '结果未确认：正文与发送标识已保留，请主动读取历史确认；不会自动重发。'
 const empty = (): Model => ({ draft: '', attempt: null, messages: [], syncCursor: null, notice: '', reading: false })
@@ -29,8 +29,8 @@ class ApiError extends Error {
   code: string
   constructor(status: number, code: string, message: string) { super(message); this.status = status; this.code = code }
 }
-async function request(body?: Attempt) {
-  const response = await fetch('/api/messages', {
+async function request(body?: Attempt, path = '/api/messages') {
+  const response = await fetch(path, {
     method: body ? 'POST' : 'GET', credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15000),
     ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ send_id: body.send_id, text: body.text, source_label: body.source_label }) } : {}),
   })
@@ -58,7 +58,7 @@ export function useMessages(active: boolean, onExpired: () => void) {
     enabled.current = false
     // 到期只隐藏并保留内存载荷；主动退出才丢弃。旧网络回调失去代次后不得恢复内容。
     update(clear ? empty() : { ...current.current, messages: [], syncCursor: null, reading: false,
-      attempt: current.current.attempt ? { ...current.current.attempt, state: 'unknown' } : null,
+      attempt: current.current.attempt ? { ...current.current.attempt, state: 'unknown', uncertain: true } : null,
       notice: current.current.attempt ? unknownNotice : current.current.notice })
   }
   function merge(messages: Message[], cursor?: string) {
@@ -93,9 +93,12 @@ export function useMessages(active: boolean, onExpired: () => void) {
     if (!enabled.current || state.attempt || !validText(state.draft) || !validLabel(source)) return
     saveLabel(source)
     const attempt: Attempt = { send_id: crypto.randomUUID(), text: state.draft, source_label: source, state: 'sending' }
+    await transmit(attempt)
+  }
+  async function transmit(attempt: Attempt) {
     const version = epoch.current
-    // 同步写入 ref，双击或连续快捷键即使赶在 React 重绘之前也只能创建一次尝试。
-    update({ ...state, attempt, notice: '发送中…' })
+    // 同步锁定，连续点击也只能发起一次请求；重试始终使用原正文、标签和标识。
+    update({ ...current.current, attempt: { ...attempt, state: 'sending' }, notice: '发送中…' })
     try {
       const value = await request(attempt)
       if (version !== epoch.current || !enabled.current) return
@@ -103,17 +106,48 @@ export function useMessages(active: boolean, onExpired: () => void) {
       merge([value])
     } catch (error) {
       if (version !== epoch.current || !enabled.current || current.current.attempt?.send_id !== attempt.send_id) return
-      // 本票没有重试入口：首次请求的已知前置拒绝可确定本次未执行；409、5xx、外层错误均不能据此换标识。
-      const rejected = error instanceof ApiError && (
+      // 重试被拒绝只说明这一次请求没有执行，不能推翻更早请求可能已经提交的事实。
+      const rejected = !attempt.uncertain && error instanceof ApiError && (
         (error.status === 400 && ['invalid_json', 'json_required'].includes(error.code)) ||
         (error.status === 413 && ['body_too_large', 'text_too_large'].includes(error.code)) ||
         (error.status === 422 && ['empty_text', 'invalid_send_id', 'invalid_source_label'].includes(error.code)) ||
         (error.status === 403 && error.code === 'origin_rejected') ||
         (error.status === 401 && error.code === 'session_invalid'))
-      update({ ...current.current, attempt: rejected ? null : { ...attempt, state: 'unknown' },
-        notice: rejected ? `未保存：${error.message}` : unknownNotice })
+      update({ ...current.current, attempt: rejected ? null : { ...attempt, state: 'unknown', uncertain: true },
+        notice: rejected ? `未保存：${error.message}` : error instanceof ApiError && error.status === 409
+          ? '结果未确认：发送标识冲突，请检查历史；不会自动更换标识。' : unknownNotice })
       if (error instanceof ApiError && error.status === 401 && error.code === 'session_invalid') expire.current()
     }
+  }
+  async function retry() {
+    const attempt = current.current.attempt
+    if (!enabled.current || attempt?.state !== 'unknown') return
+    await transmit(attempt)
+  }
+  async function query() {
+    const attempt = current.current.attempt
+    if (!enabled.current || attempt?.state !== 'unknown') return
+    const version = epoch.current
+    update({ ...current.current, attempt: { ...attempt, state: 'checking' }, notice: '正在查询发送结果…' })
+    try {
+      const value = await request(undefined, `/api/sends/${encodeURIComponent(attempt.send_id)}`)
+      if (version !== epoch.current || !enabled.current) return
+      if (!isMessage(value) || !matches(value, attempt)) throw new Error('响应无效')
+      // 即使用户已放弃确认，成功结果仍可合并；merge 只会清除当前匹配尝试的输入。
+      merge([value])
+    } catch (error) {
+      if (version !== epoch.current || !enabled.current || current.current.attempt?.send_id !== attempt.send_id) return
+      update({ ...current.current, attempt: { ...attempt, state: 'unknown' }, notice:
+        error instanceof ApiError && error.status === 404 && error.code === 'send_not_found'
+          ? '结果未确认：暂未找到；在途请求仍可能保存，可同次重试或放弃确认。' : unknownNotice })
+      if (error instanceof ApiError && error.status === 401 && error.code === 'session_invalid') expire.current()
+    }
+  }
+  function abandon() {
+    if (!enabled.current || !current.current.attempt?.uncertain) return
+    if (!window.confirm('原消息可能已经保存，请先检查历史。放弃确认不是撤回；再次发送可能重复。是否放弃确认？')) return
+    // 解除的是本地确认责任，不取消服务器写入；旧回调只能合并消息，不能接管新草稿。
+    update({ ...current.current, attempt: null, notice: '已放弃确认，草稿可编辑；原消息可能已保存，再次发送可能重复。' })
   }
   function saveLabel(value: string) {
     const normalized = normalizeLabel(value)
@@ -138,7 +172,7 @@ export function useMessages(active: boolean, onExpired: () => void) {
     window.addEventListener('beforeunload', leave)
     return () => window.removeEventListener('beforeunload', leave)
   }, [])
-  return { model, label, setLabel, saveLabel, read, send, suspend,
+  return { model, label, setLabel, saveLabel, read, send, retry, query, abandon, suspend,
     hasUnsaved: () => Boolean(current.current.draft || current.current.attempt),
     draft: (value: string) => { if (!current.current.attempt) update({ ...current.current, draft: value }) } }
 }
