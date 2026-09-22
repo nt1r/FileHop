@@ -148,7 +148,7 @@ fn confirmation_required_and_password_argument_rejected() {
 }
 
 #[tokio::test]
-async fn business_writes_unavailable() {
+async fn business_writes_require_authentication_and_status_is_read_only() {
     let i = Instance::new();
     for initialized in [false, true] {
         if initialized {
@@ -160,15 +160,21 @@ async fn business_writes_unavailable() {
                     Request::builder()
                         .method("POST")
                         .uri(path)
+                        .header("origin", "https://filehop.invalid")
+                        .header("content-type", "application/json")
                         .body(Body::from("{}"))
                         .unwrap(),
                 )
                 .await
                 .unwrap();
-            assert!(matches!(
+            assert_eq!(
                 response.status(),
-                StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED
-            ));
+                if path == "/api/messages" {
+                    StatusCode::UNAUTHORIZED
+                } else {
+                    StatusCode::METHOD_NOT_ALLOWED
+                }
+            );
         }
     }
 }
