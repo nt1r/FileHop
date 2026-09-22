@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { verifyLogout } from './logout'
+import { verifyHistory } from './history'
 import { verifyMessages, verifyMessageSafety } from './messages'
 
 test('administrator initializes storage and the page observes the real status', async ({ page }) => {
@@ -77,6 +78,7 @@ test('administrator initializes storage and the page observes the real status', 
   await page.unroute('**/api/session')
   await verifyMessages(page)
   await verifyMessageSafety(page)
+  await verifyHistory(page)
   await verifyLogout(page)
   writeFileSync(resolve(process.env.TEST_FILES!, 'storage-id'), 'mismatched')
   await page.reload()

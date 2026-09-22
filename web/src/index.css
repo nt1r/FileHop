@@ -18,7 +18,9 @@ p { line-height: 1.7; }
 label { display: block; margin: 0.75rem 0; }
 input, textarea { display: block; width: 100%; border: 1px solid #94a3b8; border-radius: 0.3rem; padding: 0.5rem; }
 textarea { min-height: 8rem; resize: vertical; }
-.messages { margin: 1rem 0; }
+/* 独立阅读区域让分页入口与输入保持可用；禁用浏览器自动锚定，避免与显式位置补偿叠加。 */
+.messages { margin: 1rem 0; max-height: 50vh; overflow-y: auto; overflow-anchor: none; position: relative; }
 .messages article { padding: 1rem; margin: 0.75rem 0; background: white; border: 1px solid #cbd5e1; border-radius: 0.5rem; }
 .messages pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.message-notice { min-height: 1.7em; }
 .message-meta { color: #475569; font-size: 0.8rem; }

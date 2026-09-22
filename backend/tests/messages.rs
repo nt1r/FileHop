@@ -233,6 +233,103 @@ async fn recent_limit_snapshot_and_invalid_queries() {
 }
 
 #[tokio::test]
+async fn history_pages_are_exclusive_continuous_and_independent_of_new_sends() {
+    let f = Fixture::new().await;
+    let mut sent = Vec::new();
+    for n in 0..103 {
+        let (status, message) = f
+            .send(
+                &uuid::Uuid::new_v4().to_string(),
+                &format!("history {n}"),
+                "Web",
+            )
+            .await;
+        assert_eq!(status, StatusCode::CREATED);
+        sent.push(message);
+    }
+    let (_, recent) = f.request("GET", "/api/messages", Value::Null).await;
+    assert_eq!(recent["messages"], json!(&sent[53..]));
+    assert_eq!(recent["before"], sent[53]["id"]);
+    f.send(
+        &uuid::Uuid::new_v4().to_string(),
+        "new during reading",
+        "Web",
+    )
+    .await;
+    let (status, older) = f
+        .request(
+            "GET",
+            &format!(
+                "/api/messages?before={}",
+                recent["before"].as_str().unwrap()
+            ),
+            Value::Null,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(older["messages"], json!(&sent[3..53]));
+    assert_eq!(older["has_older"], true);
+    assert_eq!(older["before"], sent[3]["id"]);
+    assert!(older.get("sync_cursor").is_none());
+    let (_, oldest) = f
+        .request(
+            "GET",
+            &format!("/api/messages?before={}", older["before"].as_str().unwrap()),
+            Value::Null,
+        )
+        .await;
+    assert_eq!(oldest["messages"], json!(&sent[..3]));
+    assert_eq!(oldest["has_older"], false);
+    let (_, empty) = f
+        .request("GET", "/api/messages?before=1", Value::Null)
+        .await;
+    assert_eq!(empty["messages"], json!([]));
+    assert_eq!(empty["before"], Value::Null);
+    assert_eq!(empty["has_older"], false);
+    let (_, exact) = f
+        .request("GET", "/api/messages?before=4&limit=3", Value::Null)
+        .await;
+    assert_eq!(exact["messages"], json!(&sent[..3]));
+    assert_eq!(exact["has_older"], false);
+    let (_, beyond) = f
+        .request(
+            "GET",
+            "/api/messages?before=9223372036854775807&limit=1",
+            Value::Null,
+        )
+        .await;
+    assert_eq!(beyond["messages"][0]["text"], "new during reading");
+    for query in [
+        "before=0",
+        "before=-1",
+        "before=1.5",
+        "before=9223372036854775808",
+        "before=",
+        "before=2&before=3",
+        "before=3&limit=0",
+        "before=3&after=1",
+    ] {
+        let (status, value) = f
+            .request("GET", &format!("/api/messages?{query}"), Value::Null)
+            .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{query}");
+        assert_eq!(value["code"], "invalid_query");
+    }
+    let response = f
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/messages?before=4")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
 async fn authentication_origin_and_body_errors_do_not_save_messages() {
     let f = Fixture::new().await;
     let body = json!({"send_id": uuid::Uuid::new_v4().to_string(), "text":"private", "source_label":"Web"}).to_string();
