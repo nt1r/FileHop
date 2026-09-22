@@ -45,6 +45,11 @@ export default function Messages({ exchange }: { exchange: ReturnType<typeof use
         }
       }} />
     <p className="notice">{new TextEncoder().encode(model.draft).length} / 65,536 UTF-8 字节 · Enter 换行，Ctrl/Cmd+Enter 发送。草稿仅保存在当前页面。</p>
+    {model.attempt?.uncertain && <div aria-label="发送恢复">
+      <Button disabled={model.attempt.state !== 'unknown'} onClick={() => void exchange.query()}>查询发送结果</Button>
+      <Button disabled={model.attempt.state !== 'unknown'} onClick={() => void exchange.retry()}>同次重试</Button>
+      <Button onClick={exchange.abandon}>放弃确认</Button>
+    </div>}
     <Button variant="primary" disabled={Boolean(model.attempt) || !validText(model.draft) || !validLabel(label)} onClick={() => void exchange.send()}>发送</Button>
   </section>
 }

@@ -2,7 +2,7 @@ use crate::session::{Service, authenticate, error, unavailable, write_origin_all
 use axum::{
     Json,
     body::{Body, to_bytes},
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
@@ -131,6 +131,31 @@ pub(crate) async fn send(
             },
             message,
         ),
+        Err(_) => unavailable(),
+    }
+}
+
+pub(crate) async fn result(
+    State(service): State<Arc<Service>>,
+    headers: HeaderMap,
+    Path(send_id): Path<String>,
+) -> Response {
+    // 标识不充当凭证；先认证，再查询已提交的记录。未找到只描述此刻，不取消在途写入。
+    let (mut connection, _) = match authenticate(&service, &headers).await {
+        Ok(c) => c,
+        Err(e) => return *e,
+    };
+    let Ok(id) = uuid::Uuid::parse_str(&send_id) else {
+        return error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_send_id",
+            "发送标识无效",
+        );
+    };
+    match sqlx::query_as::<_, Message>("SELECT CAST(id AS TEXT) AS id, send_id, text, source_label, created_at FROM message WHERE send_id = ?")
+        .bind(id.to_string()).fetch_optional(&mut connection).await {
+        Ok(Some(message)) => json(StatusCode::OK, message),
+        Ok(None) => error(StatusCode::NOT_FOUND, "send_not_found", "暂未找到发送结果，不代表在途发送不会保存"),
         Err(_) => unavailable(),
     }
 }
