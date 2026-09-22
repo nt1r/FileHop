@@ -27,18 +27,24 @@ function matches(message: Message, attempt: Attempt) {
 class ApiError extends Error {
   status: number
   code: string
-  constructor(status: number, code: string, message: string) { super(message); this.status = status; this.code = code }
+  retryAt: number
+  constructor(status: number, code: string, message: string, retryAt = 0) { super(message); this.status = status; this.code = code; this.retryAt = retryAt }
 }
 async function request(body?: Attempt, path = '/api/messages') {
   const response = await fetch(path, {
     method: body ? 'POST' : 'GET', credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15000),
     ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ send_id: body.send_id, text: body.text, source_label: body.source_label }) } : {}),
   })
+  const retry = response.headers.get('retry-after')
+  const retryAt = retry === null ? 0 : /^\d+$/.test(retry) ? Date.now() + Number(retry) * 1000 : Date.parse(retry) || 0
+  if (!response.ok && (response.headers.has('x-filehop-access-layer') || !response.headers.get('content-type')?.includes('application/json'))) throw new ApiError(response.status, '', '访问层异常', retryAt)
   if (response.headers.has('x-filehop-access-layer') || !response.headers.get('content-type')?.includes('application/json')) throw new Error('访问层异常')
-  const value: unknown = await response.json()
+  let value: unknown
+  try { value = await response.json() }
+  catch { throw new ApiError(response.status, '', '响应无效', retryAt) }
   if (!response.ok) {
-    if (value && typeof value === 'object' && 'code' in value && 'message' in value && typeof value.code === 'string' && typeof value.message === 'string') throw new ApiError(response.status, value.code, value.message)
-    throw new Error('响应无效')
+    if (value && typeof value === 'object' && 'code' in value && 'message' in value && typeof value.code === 'string' && typeof value.message === 'string') throw new ApiError(response.status, value.code, value.message, retryAt)
+    throw new ApiError(response.status, '', '响应无效', retryAt)
   }
   return value
 }
@@ -48,6 +54,16 @@ export function useMessages(active: boolean, onExpired: () => void) {
   const current = useRef(model)
   const [label, setLabel] = useState(savedLabel)
   const epoch = useRef(0)
+  const pollTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const retryAt = useRef(0)
+  const failures = useRef(0)
+  const nextPoll = useRef(0)
+  function schedule() {
+    clearTimeout(pollTimer.current)
+    if (!enabled.current || document.visibilityState !== 'visible') return
+    // 浏览器定时器有 32 位上限；长 Retry-After 分段等待，避免溢出后变成毫秒级忙循环。
+    pollTimer.current = setTimeout(() => void read(), Math.min(2147483647, Math.max(0, nextPoll.current - Date.now(), retryAt.current - Date.now())))
+  }
   const enabled = useRef(active)
   enabled.current = active
   const expire = useRef(onExpired)
@@ -55,6 +71,7 @@ export function useMessages(active: boolean, onExpired: () => void) {
   function update(next: Model) { current.current = next; setModel(next) }
   function suspend(clear: boolean) {
     epoch.current++
+    clearTimeout(pollTimer.current)
     enabled.current = false
     // 到期只隐藏并保留内存载荷；主动退出才丢弃。旧网络回调失去代次后不得恢复内容。
     update(clear ? empty() : { ...current.current, messages: [], syncCursor: null, before: null, hasOlder: false, historyNotice: '', reading: false,
@@ -73,11 +90,31 @@ export function useMessages(active: boolean, onExpired: () => void) {
   }
   async function read(older = false) {
     if (!enabled.current || current.current.reading) return
+    if (Date.now() < retryAt.current) { schedule(); return }
     const boundary = older ? current.current.before : null
     if (older && (!boundary || !current.current.hasOlder)) return
+    clearTimeout(pollTimer.current)
     const version = epoch.current
     update({ ...current.current, reading: true, historyNotice: '' })
     try {
+      if (!older && current.current.syncCursor !== null) {
+        // 每页先完整校验、合并再推进，失败从最后成功页继续；发送和结果查询不能挪动此游标。
+        do {
+          const cursor = current.current.syncCursor!
+          const value = await request(undefined, `/api/messages?after=${cursor}&limit=50`)
+          if (version !== epoch.current || !enabled.current) return
+          if (!value || typeof value !== 'object' || !('messages' in value) || !Array.isArray(value.messages) || !value.messages.every(isMessage) ||
+            !('has_more' in value) || typeof value.has_more !== 'boolean' || !('after' in value)) throw new Error('响应无效')
+          const messages = value.messages as Message[]
+          if (value.after !== (messages.at(-1)?.id ?? null) || (value.has_more && !messages.length) ||
+            messages.some((m, i) => BigInt(m.id) <= BigInt(i ? messages[i - 1].id : cursor))) throw new Error('响应无效')
+          merge(messages, messages.at(-1)?.id)
+          failures.current = 0
+          if (!value.has_more || document.visibilityState !== 'visible') break
+        } while (enabled.current)
+        update({ ...current.current, notice: current.current.notice.startsWith('读取失败') ? '' : current.current.notice })
+        return
+      }
       const value = await request(undefined, boundary ? `/api/messages?before=${encodeURIComponent(boundary)}&limit=50` : '/api/messages')
       if (version !== epoch.current || !enabled.current) return
       if (!value || typeof value !== 'object' || !('messages' in value) || !Array.isArray(value.messages) || !value.messages.every(isMessage) ||
@@ -96,11 +133,27 @@ export function useMessages(active: boolean, onExpired: () => void) {
       const establishHistory = current.current.syncCursor === null
       merge(messages, cursor)
       if (older || establishHistory) update({ ...current.current, before: value.before as string | null, hasOlder: value.has_older })
+      if (!older) {
+        failures.current = 0
+        update({ ...current.current, notice: current.current.notice.startsWith('读取失败') ? '' : current.current.notice })
+      }
     } catch (error) {
       if (version !== epoch.current || !enabled.current) return
       if (error instanceof ApiError && error.status === 401 && error.code === 'session_invalid') expire.current()
-      else update({ ...current.current, ...(older ? { historyNotice: '加载更早消息失败，请重试' } : { notice: '读取失败，请检查网络或访问层后主动重试' }) })
-    } finally { if (version === epoch.current) update({ ...current.current, reading: false }) }
+      else {
+        if (error instanceof ApiError) retryAt.current = Math.max(retryAt.current, error.retryAt)
+        if (!older) failures.current++
+        update({ ...current.current, ...(older ? { historyNotice: '加载更早消息失败，请重试' } : { notice: '读取失败，请检查网络或访问层；将退避重试，也可手动刷新' }) })
+      }
+    } finally {
+      if (version === epoch.current) {
+        update({ ...current.current, reading: false })
+        // 退避仅针对自动读取，手动/返回前台可提前尝试，但所有入口都必须遵守服务端期限。
+        const delay = failures.current ? Math.min(60000, 10000 * 2 ** Math.min(failures.current - 1, 3)) * (0.9 + Math.random() * 0.1) : 10000
+        if (!older) nextPoll.current = Date.now() + delay
+        schedule()
+      }
+    }
   }
   async function send() {
     const state = current.current
@@ -172,12 +225,19 @@ export function useMessages(active: boolean, onExpired: () => void) {
   }
   function invalidateRead() {
     epoch.current++
+    clearTimeout(pollTimer.current)
     current.current = { ...current.current, reading: false }
   }
   useEffect(() => {
-    if (active) void read()
-    return invalidateRead
-    // 仅在认证状态切换时读取，不增加定时同步或随输入触发读取。
+    if (active) { failures.current = 0; nextPoll.current = 0; void read() }
+    const visible = () => {
+      clearTimeout(pollTimer.current)
+      // 让会话层先处理同一次前台事件中的自然到期，避免刚恢复可见就发出已失效的业务请求。
+      if (document.visibilityState === 'visible') queueMicrotask(() => { if (enabled.current) void read() })
+    }
+    document.addEventListener('visibilitychange', visible)
+    return () => { invalidateRead(); document.removeEventListener('visibilitychange', visible) }
+    // 调度读取只随认证和可见性变化，不随草稿输入重新计时。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active])
   useEffect(() => {

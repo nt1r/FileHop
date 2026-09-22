@@ -132,7 +132,7 @@ async function verifyAbandonedRecovery(page: Page) {
     let arrived!: () => void
     const held = new Promise<void>(resolve => { release = resolve })
     const received = new Promise<void>(resolve => { arrived = resolve })
-    const path = source === 'query' ? '**/api/sends/*' : '**/api/messages'
+    const path = source === 'query' ? '**/api/sends/*' : source === 'history' ? '**/api/messages?after=*' : '**/api/messages'
     await page.route(path, async route => {
       const response = await route.fetch()
       arrived()
