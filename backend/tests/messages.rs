@@ -86,6 +86,42 @@ impl Fixture {
 }
 
 #[tokio::test]
+async fn send_result_requires_authentication_and_reports_only_committed_messages() {
+    let mut f = Fixture::new().await;
+    let id = uuid::Uuid::new_v4().to_string();
+    let path = format!("/api/sends/{id}");
+    let (status, missing) = f.request("GET", &path, Value::Null).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(missing["code"], "send_not_found");
+    let (_, message) = f.send(&id, "recover original", "Desk").await;
+    assert_eq!(
+        f.request("GET", &path, Value::Null).await,
+        (StatusCode::OK, message.clone())
+    );
+    assert_eq!(
+        f.send(&id, "recover original", "Desk").await,
+        (StatusCode::OK, message)
+    );
+    assert_eq!(
+        f.request("GET", "/api/sends/not-a-uuid", Value::Null)
+            .await
+            .0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    f.cookie.clear();
+    assert_eq!(
+        f.request("GET", &path, Value::Null).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        f.request("GET", "/api/sends/not-a-uuid", Value::Null)
+            .await
+            .0,
+        StatusCode::UNAUTHORIZED
+    );
+}
+
+#[tokio::test]
 async fn validation_uses_shared_whitespace_and_utf8_boundaries() {
     let f = Fixture::new().await;
     let cases: Vec<Value> =

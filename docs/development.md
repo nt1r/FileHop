@@ -6,14 +6,14 @@
 
 ## 当前实现状态
 
-当前开发切片支持隔离启动、显式初始化、安全登录恢复、退出及管理员撤销登录，以及最小文本发送／主动读取／复制闭环：
+当前开发切片支持隔离启动、显式初始化、安全登录恢复、退出及管理员撤销登录，以及文本发送／主动读取／复制、历史分页和未知发送恢复闭环：
 
 - `web/`：Vite + React + TypeScript + Kumo standalone 样式，初始化状态页面、安全登录、受保护的文本消息页、同页重新登录及同源标签页退出通知。
-- `backend/`：Axum + Tokio + SQLx SQLite；显式 `init` / `reset-password` 管理命令、存储标识与账户迁移、`GET /api/status`、`POST /api/session`、`GET /api/session`、`DELETE /api/session`、`POST /api/messages`、最近页及 before 历史分页 `GET /api/messages`。
+- `backend/`：Axum + Tokio + SQLx SQLite；显式 `init` / `reset-password` 管理命令、存储标识与账户迁移、`GET /api/status`、`POST /api/session`、`GET /api/session`、`DELETE /api/session`、`POST /api/messages`、最近页及 before 历史分页 `GET /api/messages`、发送结果 `GET /api/sends/{send_id}`。
 - `deploy/`：开发应用 Compose、容器构建文件及共享 Caddy 站点示例。
 - `GET /internal/live` 仅返回 204，表示进程可响应；**不是数据库可用或业务就绪检查**。不通过公网入口开放。
 
-状态查询仅返回 `uninitialized`、`initialized` 或 `storage_error`，禁止缓存且不泄露目录、账户或凭证。未初始化与存储异常不开放业务写入。定时增量同步、未知发送恢复操作入口、文件、Android 及正式发布尚未实现；初始化成功不代表整个 Spec 001 已完成。GitHub 托管 CI 定义见 `.github/workflows/check.yml`，实际执行结果以对应提交的 Actions 检查为准。
+状态查询仅返回 `uninitialized`、`initialized` 或 `storage_error`，禁止缓存且不泄露目录、账户或凭证。未初始化与存储异常不开放业务写入。定时增量同步、文件、Android 及正式发布尚未实现；初始化成功不代表整个 Spec 001 已完成。GitHub 托管 CI 定义见 `.github/workflows/check.yml`，实际执行结果以对应提交的 Actions 检查为准。
 
 ## 工具链与本地检查
 
@@ -171,17 +171,27 @@ docker compose --env-file .env -f deploy/compose.dev.yml exec backend \
 
 `POST /api/messages` 接受随机 UUID `send_id`、原样 `text` 和规范化 `source_label`，最多 512 KiB JSON；正文最多 65,536 UTF-8 字节，拒绝 Spec 固定空白集合组成的正文。来源标签以相同集合去除首尾空白后为 1–64 个 Unicode 码点。前后端使用 `tests/text-cases.json` 的共同验收样例。消息和发送标识在同一记录中原子持久化，提交成功后新建返回 201，同载荷重放 200，不同载荷返回 `409 send_conflict`；认证与 Origin 防护沿用会话边界。
 
-最近页 `GET /api/messages?limit=50` 支持 1–100，返回 `{ messages, has_older, before, sync_cursor }`，消息按数值 ID 升序，ID 和游标是十进制字符串。最近页及快照最大 ID 来自同一个读事务，空快照游标为 `0`。现支持 `before=<正整数消息 ID>` 排他历史分页：从边界前取最近一页，仍以 ID 升序返回，`before` 为本页最小 ID，空页为 null；`has_older` 表示边界前是否还存在未返回记录。历史页不返回 `sync_cursor`，不改变新增读取基线。尚不提供 `after` 查询和发送结果查询入口，传入未支持查询参数返回结构化 `400 invalid_query`，不静默当成最近页。增量补齐与恢复操作由后续票交付。
+最近页 `GET /api/messages?limit=50` 支持 1–100，返回 `{ messages, has_older, before, sync_cursor }`，消息按数值 ID 升序，ID 和游标是十进制字符串。最近页及快照最大 ID 来自同一个读事务，空快照游标为 `0`。现支持 `before=<正整数消息 ID>` 排他历史分页：从边界前取最近一页，仍以 ID 升序返回，`before` 为本页最小 ID，空页为 null；`has_older` 表示边界前是否还存在未返回记录。历史页不返回 `sync_cursor`，不改变新增读取基线。尚不提供 `after` 查询，传入未支持查询参数返回结构化 `400 invalid_query`，不静默当成最近页。增量补齐由后续票交付。发送结果查询见下节。
 
 页面提供按钮和 Ctrl/Cmd+Enter 发送、输入法组合保护及主动读取最近消息；不定时同步。消息按 ID 合并去重，本地发送不推进同步游标；重新读取最近页可建立新的快照基线，不承诺补齐超过一页的中间消息。文本用纯文本呈现，复制仅包含完整正文，权限失败有反馈。来源标签默认 Web，规范化后保存到浏览器 localStorage；正文及发送尝试只留在页面内存。
 
-请求超时、断连、5xx、未知格式和冲突保留固定载荷并锁定发送；不会自动生成新标识或重发。已认证读取找到匹配标识、正文和标签的消息可确认成功。恢复操作入口尚未交付，读不到的未知发送会继续锁定。首次发送遇到已知的输入／认证／Origin 前置拒绝才可保留正文并解锁；将来增加同次重试时不能把重试拒绝当成原请求未保存。
+请求超时、断连、5xx、未知格式和冲突保留固定载荷并锁定发送；不会自动生成新标识或重发。已认证读取找到匹配标识、正文和标签的消息可确认成功。未知发送恢复操作见下节。首次发送遇到已知的输入／认证／Origin 前置拒绝才可保留正文并解锁；同次重试拒绝不证明原请求未保存，仍保留未知状态。
 
 到期隐藏内容并保留内存草稿／未知发送，同页登录后恢复、读取历史但不自动发送；主动退出确认后与同源标签页一起清空，迟到响应失效。有未保存内容时尽力触发浏览器离开提醒，刷新不恢复草稿或自动重发。
 
-验收证据：`backend/tests/messages.rs` 覆盖 S001-A03/A05、最近页快照、认证/Origin、真实 COMMIT 失败回滚、应用重建和密码重置后的消息/身份保留；`web/tests/messages.ts` 连接真实后端完成独立会话互发与复制、共享校验样例、组合输入、双击、响应丢失、读取确认、同页到期恢复、来源标签持久化、草稿不持久化、跨页退出和迟到发送保护（S001-A02–A06/A08/A09/A13/A17 的本票范围）。Chromium 不替代 #13 稳定版 Chrome、真实 HTTPS 或真实剪贴板权限人工验收；未提供完整 A06/A07 恢复动作与 A11/A12 增量补齐、定时同步证据；历史分页验证见下节。
+验收证据：`backend/tests/messages.rs` 覆盖 S001-A03/A05、最近页快照、认证/Origin、真实 COMMIT 失败回滚、应用重建和密码重置后的消息/身份保留；`web/tests/messages.ts` 连接真实后端完成独立会话互发与复制、共享校验样例、组合输入、双击、响应丢失、读取确认、同页到期恢复、来源标签持久化、草稿不持久化、跨页退出和迟到发送保护（S001-A02–A06/A08/A09/A13/A17 的本票范围）。Chromium 不替代 #13 稳定版 Chrome、真实 HTTPS 或真实剪贴板权限人工验收；A06/A07 恢复动作及历史分页验证见下节；尚未提供 A11/A12 增量补齐、定时同步证据。
 
 本轮在尚未进入 `origin/main` 的 `0001_next_release.sql` 增加消息表。没有对既有实例执行迁移或清理；旧开发数据库不能用重新 init 处理，需保留的数据等待独立升级路径。
+
+### 未知发送恢复
+
+`GET /api/sends/{send_id}` 须重新认证，成功返回原始消息，所有结果禁止缓存；无效 UUID 返回 `422 invalid_send_id`，暂未找到返回结构化 `404 send_not_found`。未找到只表示查询时没有已提交记录，不取消在途请求，也不证明原发送不会提交。
+
+页面结果未确认时提供查询、同次重试和放弃确认。查询与重试期间禁止重复恢复请求，允许明确放弃确认；同次重试保持原 UUID、正文和来源标签，跨同页重新登录亦不改变。重试收到输入、认证、Origin、节流或冲突错误仍保留未知状态；409 明示冲突，不自动换标识。历史读取匹配三项载荷即可直接确认，无需额外查询。
+
+放弃前提示原消息可能已保存，保留可编辑草稿并提示再次发送可能重复，不撤回、不自动发送。再次主动发送使用新标识；放弃后迟到的成功响应只合并历史，不覆盖或清空新草稿。认证失效与主动退出仍使用既有代次隔离，旧恢复响应不能重新展示已隐藏或清除的内容。
+
+`backend/tests/messages.rs` 覆盖真实 SQLite 的结果查询、缺失结果、认证及重放；`web/tests/send-recovery.ts` 在真实后端上验证提交后响应丢失、查询／重试找回、404 保持未知、同页重新登录后原身份重试、401/403/429/409 分类，以及放弃后的三条读取／发送入口乱序保护。结合既有 `web/tests/messages.ts` 的历史确认与退出测试覆盖 S001-A06–A09/A14 的本切片；增量读取验证留给同步切片，稳定版 Chrome 和实际 HTTPS 仍需对应环境验收。
 
 ### 历史分页与阅读位置
 
