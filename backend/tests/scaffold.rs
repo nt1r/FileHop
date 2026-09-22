@@ -22,7 +22,7 @@ async fn liveness_does_not_claim_business_readiness() {
 
     for (path, expected) in [
         ("/api/session", StatusCode::UNAUTHORIZED),
-        ("/api/messages", StatusCode::NOT_FOUND),
+        ("/api/messages", StatusCode::UNAUTHORIZED),
     ] {
         let response = app
             .clone()
