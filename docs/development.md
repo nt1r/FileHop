@@ -57,9 +57,28 @@ bash tests/web_container_smoke.sh
 
 后端冒烟验证未初始化容器重建不创建数据、Compose 内隐藏输入初始化及重建后挂载数据可被状态 interface 验证。测试容器使用调用者 UID/GID，数据仅在一次性目录内；不代表生产部署或后续消息/文件持久化验收。
 
+## GitHub Actions 检查分层
+
+`.github/workflows/check.yml` 保留单个 `initialization` job，在 GitHub 托管 runner 上按事件选择检查范围：
+
+| 事件 | 基础检查 | 镜像构建与容器冒烟 |
+| --- | --- | --- |
+| 普通 PR → dev | 运行 | 默认跳过；下述风险路径变化时运行 |
+| dev → main 发布 PR | 运行 | 始终运行 |
+| push → dev/main（包括合并后） | 运行 | 跳过 |
+| Actions 手动运行（workflow_dispatch） | 运行 | 始终运行 |
+
+基础检查包含 Rust fmt/Clippy/测试/构建、Web lint/TypeScript/构建、真实后端浏览器冒烟、隔离 HTTPS 入口测试、Shell 语法和 Compose 配置校验，不因普通业务代码所属目录而省略。
+
+开发 PR 使用 base/head 的 merge-base 差异检查整个 PR，而非仅最后一次提交；关闭重命名检测以同时覆盖旧路径删除和新路径添加。以下变化会增加完整容器检查：`deploy/`、`.github/`、`tests/`、Docker 忽略规则及示例环境文件、Node/Rust 工具链、Cargo manifest/锁文件/配置/build.rs/迁移、前端包管理 manifest/锁文件/配置/补丁，以及 Web 构建配置与 HTML 入口。精确路径以 workflow 的 `case` 规则为准；新增构建输入时同步维护规则。
+
+普通业务变化也可能产生容器特有问题；默认延迟到发布 PR 检查。有相关风险时，在 Actions 的 Application checks 中选择对应分支手动运行完整检查（手动入口需先存在于默认分支），不要把基础检查成功当作容器路径已验证。并发组按 workflow、事件类型和 ref 隔离，手动完整检查不会被同分支的 push 基础检查取消；同一事件类型与 ref 的新运行仍会取消旧运行。
+
+当前镜像仅加载到 runner 用于测试，不推送 GHCR、不部署；Web 镜像运行开发 Vite，不是生产静态制品。正式版本 tag 的 ARM64 构建与发布遵循 Spec 004，尚未实现。PR 来源策略仍由独立的 `.github/workflows/pr-policy.yml` 检查。
+
 ## GitHub Actions 缓存
 
-`.github/workflows/check.yml` 在 GitHub 托管 runner 上复用以下缓存，不跳过原有安装、构建或测试：
+`.github/workflows/check.yml` 在所选检查范围内复用以下缓存；缓存命中不代替相应安装、构建或测试：
 
 - pnpm：Corepack 启用固定版本后，在 `web/` 中查询实际 store 路径，通过 `actions/cache` 保存下载内容，不缓存 `node_modules`。键区分 OS、架构、Node/包管理器配置和锁文件；锁文件变化时可恢复兼容的旧下载内容，再由 `--frozen-lockfile` 补齐。
 - Cargo：`Swatinem/rust-cache` 缓存下载与 `backend/target` 中的依赖编译产物，不缓存工具安装目录。键区分 runner OS/架构，并由 Action 纳入实际 Rust 编译器、相关环境变量、工具链文件、Cargo manifest 和锁文件。
@@ -67,9 +86,11 @@ bash tests/web_container_smoke.sh
 
 这些缓存仅用于检查，不作为发布制品或未来特权发布的可信输入。GitHub 将 PR 写入的缓存限制在该 PR 的 merge ref，PR 可读取可见的基分支缓存，不能将其写回基分支。未来发布流程须使用独立缓存命名空间与可信准入，不能直接复用检查缓存。缓存内容不得包含凭证、数据库或真实用户文件。
 
-首次运行、依赖/工具链更新或缓存被淘汰后仍可能下载；缓存命中也仍执行安装与正确性检查。宿主 Cargo/pnpm 缓存与 Docker 构建缓存互不共享。后端 Dockerfile 目前源码改变会使 release 编译层失效，本次只增加跨运行层缓存，不引入依赖预编译分层。Playwright 浏览器和 Linux 系统依赖暂不缓存。
+dev/main 的 push 基础检查不构建镜像，因此不会刷新对应分支的 Docker 缓存；PR 写入的缓存也不会自动成为后续其他 PR 可复用的基分支缓存。依赖、工具链或基础镜像有较大更新后，如需改善后续 PR 的容器构建耗时，可在合入 dev 后选择 dev 手动运行一次完整检查，刷新其 Docker 缓存。这是可选的性能维护，不是正确性门槛；不为预热缓存恢复每次 push 的镜像构建。
 
-验证冷/热缓存时，在 GitHub 上观察同一 PR 的首次运行与再次运行：两次完整检查都应通过；第二次 pnpm/Cargo 步骤应报告缓存恢复，Docker 应出现缓存导入及适用层的 `CACHED`，且两个容器冒烟仍执行。需要强制冷缓存时，在临时测试分支更换缓存键前缀和 Docker scope，不删除共享缓存。实际命中率与耗时以对应运行日志为准，本地静态校验不能代替此验证。
+首次运行、依赖/工具链更新或缓存被淘汰后仍可能下载；缓存命中也仍执行安装与正确性检查。宿主 Cargo/pnpm 缓存与 Docker 构建缓存互不共享。后端 Dockerfile 目前源码改变会使 release 编译层失效，目前仅使用跨运行层缓存，尚未引入依赖预编译分层。Playwright 浏览器和 Linux 系统依赖暂不缓存。
+
+验证冷/热缓存时，选择会触发容器检查的 PR 首次运行与再次运行，或对同一提交手动运行两次完整检查：两次完整检查都应通过；第二次 pnpm/Cargo 步骤应报告缓存恢复，Docker 应出现缓存导入及适用层的 `CACHED`，且两个容器冒烟仍执行。需要强制冷缓存时，在临时测试分支更换缓存键前缀和 Docker scope，不删除共享缓存。实际命中率与耗时以对应运行日志为准，本地静态校验不能代替此验证。
 
 ## 开发运行：需先完成环境接入
 

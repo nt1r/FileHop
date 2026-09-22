@@ -5,12 +5,13 @@ on:
     branches: [dev, main]
   push:
     branches: [dev, main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: checks-${{ github.workflow }}-${{ github.ref }}
+  group: checks-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -19,6 +20,41 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Select container checks
+        id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          containers=false
+          if [[ "$EVENT_NAME" == workflow_dispatch || ( "$EVENT_NAME" == pull_request && "$BASE_REF" == main ) ]]; then
+            containers=true
+          elif [[ "$EVENT_NAME" == pull_request ]]; then
+            # Compare the entire PR, not just its last commit. Disable rename
+            # detection so moving a watched file away still triggers checks.
+            changes=$(mktemp)
+            trap 'rm -f -- "$changes"' EXIT
+            git diff --name-only --no-renames -z "$BASE_SHA...$HEAD_SHA" > "$changes"
+            while IFS= read -r -d '' path; do
+              case "$path" in
+                deploy/*|.github/*|tests/*|.dockerignore|.env.example|.nvmrc|rust-toolchain*|\
+                Cargo.toml|Cargo.lock|backend/Cargo.toml|backend/Cargo.lock|\
+                .cargo/*|backend/.cargo/*|backend/build.rs|backend/migrations/*|\
+                package.json|pnpm-lock.yaml|pnpm-workspace.yaml|.npmrc|\
+                web/package.json|web/pnpm-lock.yaml|web/pnpm-workspace.yaml|web/.npmrc|\
+                web/.pnpmfile.*|web/patches/*|web/*config*|web/index.html)
+                  containers=true
+                  break
+                  ;;
+              esac
+            done < "$changes"
+          fi
+          echo "containers=$containers" >> "$GITHUB_OUTPUT"
+          echo "Container checks: $containers"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
@@ -76,8 +112,10 @@ jobs:
       - name: Compose configuration
         run: docker compose --env-file .env.example -f deploy/compose.dev.yml config --quiet
       - name: Set up Docker Buildx
+        if: steps.scope.outputs.containers == 'true'
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
       - name: Build backend container
+        if: steps.scope.outputs.containers == 'true'
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
           context: .
@@ -88,6 +126,7 @@ jobs:
           cache-from: type=gha,version=2,scope=checks-backend-${{ runner.os }}-${{ runner.arch }}
           cache-to: type=gha,version=2,scope=checks-backend-${{ runner.os }}-${{ runner.arch }},mode=max
       - name: Build web container
+        if: steps.scope.outputs.containers == 'true'
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
           context: .
@@ -98,6 +137,7 @@ jobs:
           cache-from: type=gha,version=2,scope=checks-web-${{ runner.os }}-${{ runner.arch }}
           cache-to: type=gha,version=2,scope=checks-web-${{ runner.os }}-${{ runner.arch }},mode=max
       - name: Container smoke tests
+        if: steps.scope.outputs.containers == 'true'
         run: |
           bash tests/compose_smoke.sh
           bash tests/web_container_smoke.sh

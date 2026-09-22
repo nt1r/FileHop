@@ -22,4 +22,6 @@ Before committing, pushing, or publishing an Issue/PR or artifact:
 
 See [AGENTS.md](AGENTS.md#public-repository-privacy) for the agent guardrails. Do not use a list of previously exposed real values as a committed regression fixture.
 
-Workflows check PR branch policy and the initialization slice's application builds, static checks, real-storage tests, browser smoke, and isolated container smoke on GitHub-hosted runners. Release workflows are not implemented yet. Creating branches or merging a PR does not deploy the application.
+Workflows check PR branch policy and run application builds, static checks, real-storage tests, browser smoke, shell syntax, and Compose configuration validation on GitHub-hosted runners. Development PRs additionally build test images and run isolated container smoke when container, dependency, toolchain, build configuration, migration, or CI/test orchestration paths change. PRs into `main` always run those container checks; pushes to `dev`/`main` run the base checks only. Manual Application checks runs include the full container checks. See the [development guide](docs/development.md#github-actions-检查分层) for selection details and limitations.
+
+Test images are loaded only into the runner, not published. Production ARM64 artifact publishing from eligible version tags on `main` is specified but not implemented yet. Creating branches or merging a PR does not deploy the application.
