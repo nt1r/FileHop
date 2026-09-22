@@ -6,15 +6,30 @@ export default function Messages({ exchange }: { exchange: ReturnType<typeof use
   const { model, label } = exchange
   const composing = useRef(false)
   const [copyNotice, setCopyNotice] = useState('')
-  const bottom = useRef<HTMLDivElement>(null)
+  const list = useRef<HTMLDivElement>(null)
   const positioned = useRef(false)
+  const following = useRef(true)
+  const previousFirst = useRef<{ id: string; top: number } | null>(null)
+  const [atBottom, setAtBottom] = useState(true)
+  function scrollToLatest() {
+    const element = list.current
+    if (element) element.scrollTop = element.scrollHeight
+    following.current = true
+    setAtBottom(true)
+  }
   useLayoutEffect(() => {
-    // 首个成功快照定位到最新；之后主动读取不抢走正在阅读旧内容的用户位置。
-    if (model.syncCursor !== null && !positioned.current) {
-      positioned.current = true
-      bottom.current?.scrollIntoView({ block: 'end' })
-    }
-  }, [model.syncCursor])
+    const element = list.current
+    if (!element) return
+    const previous = previousFirst.current
+    const anchor = previous ? element.querySelector<HTMLElement>(`[data-message-id="${previous.id}"]`) : null
+    // 旧页插入后按原首条的位置差补偿，不按总高度补偿，避免同时到达的新消息也把阅读位置推走。
+    const prepended = previous && model.messages[0]?.id !== previous.id && anchor
+    if (prepended) element.scrollTop += anchor.offsetTop - previous.top
+    else if (model.syncCursor !== null && (!positioned.current || following.current)) scrollToLatest()
+    if (model.syncCursor !== null) positioned.current = true
+    const first = element.querySelector<HTMLElement>('[data-message-id]')
+    previousFirst.current = first ? { id: first.dataset.messageId!, top: first.offsetTop } : null
+  }, [model.messages, model.syncCursor])
   // 复制结果不包含正文；复制动作必须由用户触发，不能随消息读取自动改写剪贴板。
   async function copy(text: string) {
     setCopyNotice('')
@@ -24,16 +39,21 @@ export default function Messages({ exchange }: { exchange: ReturnType<typeof use
   return <section aria-label="消息流">
     <h2>消息流</h2>
     <Button disabled={model.reading} onClick={() => void exchange.read()}>读取最近消息</Button>
-    <p aria-live="polite">{model.notice}</p>
-    <p aria-live="polite">{copyNotice}</p>
-    <div className="messages">
+    <Button style={{ visibility: model.hasOlder ? 'visible' : 'hidden' }} disabled={model.reading || !model.hasOlder} onClick={() => void exchange.read(true)}>加载更早消息</Button>
+    <Button style={{ visibility: atBottom ? 'hidden' : 'visible' }} onClick={scrollToLatest}>回到最新</Button>
+    <p className="message-notice" aria-live="polite">{model.historyNotice || model.notice}</p>
+    <p className="message-notice" aria-live="polite">{copyNotice}</p>
+    <div className="messages" ref={list} tabIndex={0} aria-label="消息历史" onScroll={() => {
+      const element = list.current!
+      following.current = element.scrollHeight - element.scrollTop - element.clientHeight < 8
+      setAtBottom(following.current)
+    }}>
       {model.messages.length === 0 && <p>暂无消息。</p>}
-      {model.messages.map(message => <article key={message.id}>
+      {model.messages.map(message => <article key={message.id} data-message-id={message.id}>
         <p className="message-meta">{message.source_label} · <time dateTime={message.created_at}>{message.created_at}</time></p>
         <pre>{message.text}</pre>
         <Button onClick={() => void copy(message.text)}>复制正文</Button>
       </article>)}
-      <div ref={bottom} />
     </div>
     <label>来源标签<input value={label} onChange={e => exchange.setLabel(e.target.value)} onBlur={() => exchange.saveLabel(label)} /></label>
     {!validLabel(label) && <p>来源标签去除首尾空白后须为 1–64 个字符。</p>}

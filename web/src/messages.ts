@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 
 export type Message = { id: string; send_id: string; text: string; source_label: string; created_at: string }
 type Attempt = { send_id: string; text: string; source_label: string; state: 'sending' | 'unknown' | 'checking'; uncertain?: boolean }
-type Model = { draft: string; attempt: Attempt | null; messages: Message[]; syncCursor: string | null; notice: string; reading: boolean }
+type Model = { draft: string; attempt: Attempt | null; messages: Message[]; syncCursor: string | null; before: string | null; hasOlder: boolean; historyNotice: string; notice: string; reading: boolean }
 const unknownNotice = '结果未确认：正文与发送标识已保留，请主动读取历史确认；不会自动重发。'
-const empty = (): Model => ({ draft: '', attempt: null, messages: [], syncCursor: null, notice: '', reading: false })
+const empty = (): Model => ({ draft: '', attempt: null, messages: [], syncCursor: null, before: null, hasOlder: false, historyNotice: '', notice: '', reading: false })
 const space = '\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000'
 export const normalizeLabel = (value: string) => value.replace(new RegExp(`^[${space}]+|[${space}]+$`, 'g'), '')
 export function validText(value: string) {
@@ -57,7 +57,7 @@ export function useMessages(active: boolean, onExpired: () => void) {
     epoch.current++
     enabled.current = false
     // 到期只隐藏并保留内存载荷；主动退出才丢弃。旧网络回调失去代次后不得恢复内容。
-    update(clear ? empty() : { ...current.current, messages: [], syncCursor: null, reading: false,
+    update(clear ? empty() : { ...current.current, messages: [], syncCursor: null, before: null, hasOlder: false, historyNotice: '', reading: false,
       attempt: current.current.attempt ? { ...current.current.attempt, state: 'unknown', uncertain: true } : null,
       notice: current.current.attempt ? unknownNotice : current.current.notice })
   }
@@ -71,20 +71,35 @@ export function useMessages(active: boolean, onExpired: () => void) {
       syncCursor: cursor ?? state.syncCursor,
       ...(confirmed ? { draft: '', attempt: null, notice: '发送成功' } : {}) })
   }
-  async function read() {
+  async function read(older = false) {
     if (!enabled.current || current.current.reading) return
+    const boundary = older ? current.current.before : null
+    if (older && (!boundary || !current.current.hasOlder)) return
     const version = epoch.current
-    update({ ...current.current, reading: true })
+    update({ ...current.current, reading: true, historyNotice: '' })
     try {
-      const value = await request()
+      const value = await request(undefined, boundary ? `/api/messages?before=${encodeURIComponent(boundary)}&limit=50` : '/api/messages')
       if (version !== epoch.current || !enabled.current) return
       if (!value || typeof value !== 'object' || !('messages' in value) || !Array.isArray(value.messages) || !value.messages.every(isMessage) ||
-        !('sync_cursor' in value) || typeof value.sync_cursor !== 'string' || !/^(0|[1-9][0-9]*)$/.test(value.sync_cursor)) throw new Error('响应无效')
-      merge(value.messages, value.sync_cursor)
+        !('has_older' in value) || typeof value.has_older !== 'boolean' || !('before' in value) ||
+        (value.before !== null && (typeof value.before !== 'string' || !/^[1-9][0-9]*$/.test(value.before)))) throw new Error('响应无效')
+      const messages = value.messages as Message[]
+      if (value.before !== (messages[0]?.id ?? null) || (value.has_older && !messages.length) ||
+        messages.some((m, i) => (boundary !== null && BigInt(m.id) >= BigInt(boundary)) || (i > 0 && BigInt(m.id) <= BigInt(messages[i - 1].id)))) throw new Error('响应无效')
+      let cursor: string | undefined
+      if (!older) {
+        if (!('sync_cursor' in value) || typeof value.sync_cursor !== 'string' || !/^(0|[1-9][0-9]*)$/.test(value.sync_cursor)) throw new Error('响应无效')
+        cursor = value.sync_cursor
+      }
+      // 历史、最近页和发送都经同一合并入口，读取找到原发送时也能确认成功。
+      // 已建立的历史边界不能被最近页或本地发送覆盖，否则中间旧记录会被跳过。
+      const establishHistory = current.current.syncCursor === null
+      merge(messages, cursor)
+      if (older || establishHistory) update({ ...current.current, before: value.before as string | null, hasOlder: value.has_older })
     } catch (error) {
       if (version !== epoch.current || !enabled.current) return
       if (error instanceof ApiError && error.status === 401 && error.code === 'session_invalid') expire.current()
-      else update({ ...current.current, notice: '读取失败，请检查网络或访问层后主动重试' })
+      else update({ ...current.current, ...(older ? { historyNotice: '加载更早消息失败，请重试' } : { notice: '读取失败，请检查网络或访问层后主动重试' }) })
     } finally { if (version === epoch.current) update({ ...current.current, reading: false }) }
   }
   async function send() {
