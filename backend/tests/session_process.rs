@@ -63,7 +63,7 @@ fn http(address: SocketAddr, request: &str) -> String {
 }
 
 #[test]
-fn committed_session_survives_sigkill_and_restart() {
+fn committed_message_and_session_survive_sigkill_and_graceful_restart() {
     let root = tempfile::tempdir().unwrap();
     let database = root.path().join("database");
     let files = root.path().join("files");
@@ -99,16 +99,79 @@ fn committed_session_survives_sigkill_and_restart() {
         .next()
         .unwrap()
         .to_owned();
-    drop(server); // SIGKILL，不经过优雅关闭路径。
-    let (_server, address) = start(&database, &files);
-    let response = http(
-        address,
-        &format!(
-            "GET /api/session HTTP/1.1\r\nHost: localhost\r\nCookie: {cookie}\r\nConnection: close\r\n\r\n"
-        ),
-    );
-    assert!(response.starts_with("HTTP/1.1 200"));
-    assert!(response.contains("cache-control: no-store"));
+    let payload = serde_json::json!({
+        "send_id": "12345678-1234-4234-8234-123456789abc",
+        "text": "  synthetic persistence\n第二行 <b>plain text</b>  ",
+        "source_label": "Lifecycle test"
+    });
+    let send = |address| {
+        let body = payload.to_string();
+        http(
+            address,
+            &format!(
+                "POST /api/messages HTTP/1.1\r\nHost: localhost\r\nOrigin: https://filehop.invalid\r\nCookie: {cookie}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            ),
+        )
+    };
+    let get = |address, path| {
+        http(
+            address,
+            &format!(
+                "GET {path} HTTP/1.1\r\nHost: localhost\r\nCookie: {cookie}\r\nConnection: close\r\n\r\n"
+            ),
+        )
+    };
+    let json = |response: &str| -> serde_json::Value {
+        serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap()
+    };
+    let response = send(address);
+    assert!(response.starts_with("HTTP/1.1 201"));
+    let saved = json(&response);
+    assert_eq!(saved["text"], payload["text"]);
+    assert_eq!(saved["send_id"], payload["send_id"]);
+    assert_eq!(saved["source_label"], payload["source_label"]);
+    let session = json(&get(address, "/api/session"));
+    drop(server); // SIGKILL，不经过优雅关闭路径；成功响应必须已经持久化。
+    let (mut server, mut address) = start(&database, &files);
+    for graceful in [false, true] {
+        let response = get(address, "/api/session");
+        assert!(response.starts_with("HTTP/1.1 200"));
+        assert!(response.contains("cache-control: no-store"));
+        assert_eq!(json(&response)["expires_at"], session["expires_at"]);
+        let response = get(address, "/api/sends/12345678-1234-4234-8234-123456789abc");
+        assert!(response.starts_with("HTTP/1.1 200"));
+        assert_eq!(json(&response), saved);
+        let response = send(address);
+        assert!(response.starts_with("HTTP/1.1 200"));
+        assert_eq!(json(&response), saved);
+        let response = get(address, "/api/messages");
+        assert!(response.starts_with("HTTP/1.1 200"));
+        assert_eq!(json(&response)["messages"], serde_json::json!([saved]));
+        if !graceful {
+            // SIGTERM 走正式优雅关闭路径，限定等待期限以免测试无限挂起。
+            assert!(
+                Command::new("kill")
+                    .args(["-TERM", &server.0.id().to_string()])
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                if let Some(status) = server.0.try_wait().unwrap() {
+                    assert!(status.success());
+                    break;
+                }
+                assert!(Instant::now() < deadline, "graceful shutdown timed out");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            // 下一次迭代必须访问新进程，而非已经停止的旧地址。
+            let (restarted, new_address) = start(&database, &files);
+            server = restarted;
+            address = new_address;
+        }
+    }
 }
 
 #[tokio::test]
