@@ -53,6 +53,34 @@ if [[ "$mode" == host ]]; then
   compose+=(-f "$root/deploy/compose.host.yml")
 fi
 "${compose[@]}" config --quiet
+# Compose selects by project name, not directory. Include stopped containers;
+# ownership mismatches require an explicit migration, never an implicit up.
+expected_configs="$root/deploy/compose.dev.yml"
+[[ "$mode" != host ]] || expected_configs+=",$root/deploy/compose.host.yml"
+containers=$(docker ps --all --quiet --filter label=com.docker.compose.project=filehop-dev)
+while IFS= read -r container; do
+  [[ -n "$container" ]] || continue
+  identity=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}{{println}}{{index .Config.Labels "com.docker.compose.project.config_files"}}{{println}}{{index .Config.Labels "com.docker.compose.service"}}{{println}}{{range .Mounts}}{{.Type}}|{{.Source}}|{{.Destination}}|{{.RW}}{{println}}{{end}}' "$container")
+  mapfile -t fields <<< "$identity"
+  [[ "${fields[0]:-}" == "$root/deploy" && "${fields[1]:-}" == "$expected_configs" ]] || fail 'Existing project belongs to a different deployment directory or entry mode; explicit migration required'
+  case "${fields[2]:-}" in
+    backend) expected_mounts=("bind|$database|/data/database|true" "bind|$files|/data/files|true") ;;
+    web) expected_mounts=("bind|$(realpath -e -- "$root/web/src")|/app/src|false" "bind|$(realpath -e -- "$root/web/index.html")|/app/index.html|false" "bind|$(realpath -e -- "$root/web/vite.config.ts")|/app/vite.config.ts|false") ;;
+    *) fail 'Existing project contains an unexpected service' ;;
+  esac
+  actual_mounts=()
+  for field in "${fields[@]:3}"; do
+    [[ -z "$field" ]] || actual_mounts+=("$field")
+  done
+  [[ ${#actual_mounts[@]} == ${#expected_mounts[@]} ]] || fail 'Existing project mount set differs from the target deployment'
+  for expected in "${expected_mounts[@]}"; do
+    found=false
+    for actual in "${actual_mounts[@]}"; do
+      [[ "$actual" != "$expected" ]] || found=true
+    done
+    "$found" || fail 'Existing project mount differs from the target deployment'
+  done
+done <<< "$containers"
 case "$action" in
   check) ;;
   status) "${compose[@]}" ps ;;
