@@ -4,6 +4,7 @@
 !.env.example
 /secrets/
 /deploy/*.local.caddy
+/DEPLOYED_COMMIT
 
 # Persistent and temporary application data
 /data-dev/
