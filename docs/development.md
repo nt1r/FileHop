@@ -59,6 +59,36 @@ bash tests/web_container_smoke.sh
 
 测试容器使用调用者 UID/GID，数据库、文件目录和合成凭证仅在一次性目录内，结束后核对路径并清理；不代表生产部署、真实主机掉电、磁盘损坏恢复或文件持久化验收。
 
+## 固定开发部署的管理入口
+
+长期运行的开发站点应使用固定目录中的源码快照或专用普通 clone，不从可删除的 linked worktree 部署。`web/src` 是运行中的只读 bind mount，删除宿主源码会导致页面模块加载失败；数据库和文件目录也不能随 worktree 清理。固定目录仍需由操作者保留，脚本无法防止运行期间的外部删除。
+
+仓库提供统一入口 `scripts/dev.sh`，由 Compose 协调前后端，不分别维护两个启动脚本。显式指定已准备好的绝对部署目录及入口类型：
+
+```bash
+# 路径为示例，替换成操作者确认的固定开发目录。
+bash scripts/dev.sh /srv/filehop-dev host check
+bash scripts/dev.sh /srv/filehop-dev host status
+bash scripts/dev.sh /srv/filehop-dev host start
+bash scripts/dev.sh /srv/filehop-dev host stop
+```
+
+从代码仓库调用脚本，参数指向固定部署目录；两者可以分离，无需向部署目录复制另一套管理脚本。选择与现有入口一致的模式：`host` 使用宿主 overlay，`container` 使用基础 Compose。项目名固定为 `filehop-dev`，每个 Docker daemon 仅管理这一套开发栈。
+
+脚本只管理已有部署：启动使用已有镜像，停止保留容器和数据；构建、版本更新和账户初始化走下述独立流程。操作前核对同名项目所有容器（包括已停止容器）的部署目录、入口配置、服务及实际挂载；不匹配时拒绝操作，迁移必须另行确认。检查与操作之间仍需避免其他操作者并发修改该项目。路径检查细节以脚本为准。配置或目录损坏导致管理命令拒绝执行时，先核实项目归属再直接用 Docker 诊断，不能自动补建目录掩盖数据缺失。
+
+执行前确认 Docker context 和 Shell 中的 Compose 配置变量指向目标开发实例；Shell 同名变量可覆盖 `.env`。`check` 通过只表示路径和 Compose 配置合法，服务健康和数据状态仍须复验。
+
+### 初次准备与后续更新
+
+1. **准备**：初次部署按[环境接入](#开发运行需先完成环境接入)落实网络、配置和目录权限；宿主入口另读[宿主入口指南](host-ingress.md)。更新已有实例时，先取得授权并核对现有挂载、数据和数据库结构兼容性。当前无独立升级命令，不兼容时停止更新，不能用 `init` 或清库替代。
+2. **构建**：在维护窗口停止已有服务，仅替换受版本管理的源码，保留 `.env`、`data-dev/` 和本地运行记录；避免全目录删除或清理。完成条件是两个镜像均由目标源码构建，而非仅存在同名镜像。可用本地 `DEPLOYED_COMMIT` 记录 SHA，记录本身不证明镜像版本。
+3. **复验**：启动后验证页面入口模块、API、外层认证及预期数据状态，再完成浏览器复验。已有实例变为未初始化时停止验收并调查数据，不创建替代账户。
+
+脚本和测试纳入版本管理；实际配置、凭证、数据库、文件和 `DEPLOYED_COMMIT` 留在部署目录，不提交。
+
+本地验证：`bash tests/dev_script.sh` 检查公开 CLI 拒绝路径及 Docker 调用参数（使用假 Docker，不接触运行栈）；真实 Compose 配置和容器能力由既有配置检查与隔离冒烟验证，不把 CLI 测试当作容器启动证据。
+
 ## GitHub Actions 检查分层
 
 `.github/workflows/check.yml` 保留单个 `initialization` job，在 GitHub 托管 runner 上按事件选择检查范围：
@@ -72,7 +102,7 @@ bash tests/web_container_smoke.sh
 
 基础检查包含 Rust fmt/Clippy/测试/构建、Web lint/TypeScript/构建、真实后端浏览器冒烟、隔离 HTTPS 入口测试、Shell 语法和 Compose 配置校验，不因普通业务代码所属目录而省略。
 
-开发 PR 使用 base/head 的 merge-base 差异检查整个 PR，而非仅最后一次提交；关闭重命名检测以同时覆盖旧路径删除和新路径添加。以下变化会增加完整容器检查：`deploy/`、`.github/`、`tests/`、Docker 忽略规则及示例环境文件、Node/Rust 工具链、Cargo manifest/锁文件/配置/build.rs/迁移、前端包管理 manifest/锁文件/配置/补丁，以及 Web 构建配置与 HTML 入口。精确路径以 workflow 的 `case` 规则为准；新增构建输入时同步维护规则。
+开发 PR 使用 base/head 的 merge-base 差异检查整个 PR，而非仅最后一次提交；关闭重命名检测以同时覆盖旧路径删除和新路径添加。以下变化会增加完整容器检查：`deploy/`、`scripts/`、`.github/`、`tests/`、Docker 忽略规则及示例环境文件、Node/Rust 工具链、Cargo manifest/锁文件/配置/build.rs/迁移、前端包管理 manifest/锁文件/配置/补丁，以及 Web 构建配置与 HTML 入口。精确路径以 workflow 的 `case` 规则为准；新增构建输入时同步维护规则。
 
 普通业务变化也可能产生容器特有问题；默认延迟到发布 PR 检查。有相关风险时，在 Actions 的 Application checks 中选择对应分支手动运行完整检查（手动入口需先存在于默认分支），不要把基础检查成功当作容器路径已验证。并发组按 workflow、事件类型和 ref 隔离，手动完整检查不会被同分支的 push 基础检查取消；同一事件类型与 ref 的新运行仍会取消旧运行。
 
