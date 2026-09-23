@@ -2,7 +2,7 @@
 
 See the [development guide](docs/development.md) for toolchains, build/test commands, and isolated development setup.
 
-- `dev` is the repository's default branch. Start a working branch from `dev` and open its pull request against `dev`; verify the base before submitting.
+- `dev` is the repository's default branch. For a task PR, use a working branch based on `dev` and verify the PR targets `dev`. A worktree created with its own task branch already satisfies this workflow: commit and push that branch instead of creating another at submission time. Create a branch only when no suitable task branch exists (for example, when working on `dev`).
 - Open release pull requests from this repository's `dev` branch into `main`.
 - Direct pushes, force pushes, and deletion of `main` or `dev` are blocked.
 - Both branches require the `main-source-policy` check and resolved review conversations. No approving review is required while this is a solo project.
