@@ -165,6 +165,7 @@ pub(crate) async fn result(
 pub(crate) struct RecentQuery {
     limit: Option<u32>,
     before: Option<i64>,
+    after: Option<i64>,
 }
 
 pub(crate) async fn recent(
@@ -176,23 +177,36 @@ pub(crate) async fn recent(
         Ok(c) => c,
         Err(e) => return *e,
     };
-    let (limit, boundary) = match query {
+    let (limit, boundary, after) = match query {
         Ok(Query(q))
-            if (1..=100).contains(&q.limit.unwrap_or(50)) && q.before.is_none_or(|id| id > 0) =>
+            if (1..=100).contains(&q.limit.unwrap_or(50))
+                && q.before.is_none_or(|id| id > 0)
+                && q.after.is_none_or(|id| id >= 0)
+                && !(q.before.is_some() && q.after.is_some()) =>
         {
-            (q.limit.unwrap_or(50), q.before)
+            (q.limit.unwrap_or(50), q.before, q.after)
         }
         _ => {
             return error(
                 StatusCode::BAD_REQUEST,
                 "invalid_query",
-                "limit 须为 1–100，before 须为有效正整数消息 ID；不支持其他查询参数",
+                "limit 须为 1–100，before 须为正整数，after 须为非负整数消息 ID；两种边界互斥",
             );
         }
     };
     let result: Result<serde_json::Value, sqlx::Error> = async {
         // 快照最大值和最近页同属一个读事务；期间的新提交留给独立的增量游标读取。
         let mut tx = connection.begin().await?;
+        // 增量从边界后最早记录开始，不能取最近页，否则离线期间超过一页的消息会永久遗漏。
+        if let Some(after) = after {
+            let mut messages = sqlx::query_as::<_, Message>("SELECT CAST(id AS TEXT) AS id, send_id, text, source_label, created_at FROM message WHERE id > ? ORDER BY message.id ASC LIMIT ?")
+                .bind(after).bind(limit + 1).fetch_all(&mut *tx).await?;
+            let has_more = messages.len() > limit as usize;
+            messages.truncate(limit as usize);
+            let after = messages.last().map(|m| m.id.clone());
+            tx.commit().await?;
+            return Ok(serde_json::json!({"messages":messages,"after":after,"has_more":has_more}));
+        }
         let cursor: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) FROM message").fetch_one(&mut *tx).await?;
         // 历史从排他边界向前取最近一页，多取一条判断是否还有旧记录；新增消息不会挤动旧页。
         let mut messages = if let Some(before) = boundary {

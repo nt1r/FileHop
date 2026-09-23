@@ -366,6 +366,63 @@ async fn history_pages_are_exclusive_continuous_and_independent_of_new_sends() {
 }
 
 #[tokio::test]
+async fn incremental_pages_fill_every_gap_without_using_local_send_as_cursor() {
+    let f = Fixture::new().await;
+    let (_, baseline) = f.request("GET", "/api/messages", Value::Null).await;
+    assert_eq!(baseline["sync_cursor"], "0");
+    let mut sent = Vec::new();
+    for n in 0..105 {
+        let (status, message) = f
+            .send(
+                &uuid::Uuid::new_v4().to_string(),
+                &format!("increment {n}"),
+                "Web",
+            )
+            .await;
+        assert_eq!(status, StatusCode::CREATED);
+        sent.push(message);
+    }
+    let mut cursor = "0".to_owned();
+    for (start, end, more) in [(0, 50, true), (50, 100, true), (100, 105, false)] {
+        let (status, page) = f
+            .request(
+                "GET",
+                &format!("/api/messages?after={cursor}&limit=50"),
+                Value::Null,
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(page["messages"], json!(&sent[start..end]));
+        assert_eq!(page["has_more"], more);
+        assert_eq!(page["after"], sent[end - 1]["id"]);
+        assert!(page.get("sync_cursor").is_none());
+        cursor = page["after"].as_str().unwrap().to_owned();
+    }
+    let (_, empty) = f
+        .request("GET", &format!("/api/messages?after={cursor}"), Value::Null)
+        .await;
+    assert_eq!(empty["messages"], json!([]));
+    assert_eq!(empty["after"], Value::Null);
+    assert_eq!(empty["has_more"], false);
+    for query in [
+        "after=-1",
+        "after=",
+        "after=1.5",
+        "after=9223372036854775808",
+        "after=1&after=2",
+        "after=0&before=1",
+        "after=0&limit=101",
+    ] {
+        assert_eq!(
+            f.request("GET", &format!("/api/messages?{query}"), Value::Null)
+                .await
+                .0,
+            StatusCode::BAD_REQUEST
+        );
+    }
+}
+
+#[tokio::test]
 async fn authentication_origin_and_body_errors_do_not_save_messages() {
     let f = Fixture::new().await;
     let body = json!({"send_id": uuid::Uuid::new_v4().to_string(), "text":"private", "source_label":"Web"}).to_string();
