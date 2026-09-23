@@ -1,26 +1,82 @@
 @import '@cloudflare/kumo/styles/standalone';
 
 :root {
-  font-family: system-ui, sans-serif;
-  color: #18212f;
-  background: #f5f7fa;
+  color-scheme: light;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
 
-body { margin: 0; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 8% -10%, color-mix(in srgb, var(--color-kumo-brand) 16%, transparent), transparent 32rem),
+    linear-gradient(180deg, var(--color-kumo-canvas) 0%, color-mix(in srgb, var(--color-kumo-elevated) 72%, var(--color-kumo-canvas)) 100%);
+}
+
 #root { isolation: isolate; }
-.welcome { max-width: 48rem; margin: 12vh auto; padding: 2rem; }
-h1 { font-size: 2rem; line-height: 1.3; }
-p { line-height: 1.7; }
-.eyebrow { color: #475569; font-weight: 600; }
-.notice { color: #475569; font-size: 0.875rem; }
-label { display: block; margin: 0.75rem 0; }
-input, textarea { display: block; width: 100%; border: 1px solid #94a3b8; border-radius: 0.3rem; padding: 0.5rem; }
-textarea { min-height: 8rem; resize: vertical; }
+
+.app-shell {
+  box-sizing: border-box;
+  width: min(1180px, calc(100% - 4rem));
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 2.5rem 0 3rem;
+}
+
+.masthead, .panel-heading, .composer-heading, .action-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+
+.brand-lockup { display: grid; gap: 0.35rem; }
+.brand-mark { display: flex; align-items: center; gap: 0.7rem; }
+
+.stage {
+  display: grid;
+  grid-template-columns: minmax(18rem, 0.72fr) minmax(24rem, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+  margin-top: 2.75rem;
+}
+
+.intro { position: sticky; top: 2rem; padding: 0.25rem 0.5rem 0 0; }
+.intro-title { max-width: 11ch; margin: 0.8rem 0 1rem; font-size: clamp(3.4rem, 6vw, 5.5rem); line-height: 0.98; letter-spacing: -0.045em; }
+.capability-list { display: grid; gap: 0.75rem; margin: 2rem 0 0; padding: 0; list-style: none; }
+.capability-list li { display: grid; grid-template-columns: auto 1fr; gap: 0.75rem; align-items: start; }
+
+.workspace { display: grid; gap: 1rem; }
+.panel { padding: 1.35rem; }
+.status-panel, .composer { display: grid; gap: 1rem; }
+.login-form { display: grid; gap: 1rem; }
+
+.stream { display: grid; gap: 0.85rem; }
+.stream-toolbar { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 /* 独立阅读区域让分页入口与输入保持可用；禁用浏览器自动锚定，避免与显式位置补偿叠加。 */
-.messages { margin: 1rem 0; max-height: 50vh; overflow-y: auto; overflow-anchor: none; position: relative; }
-.messages article { padding: 1rem; margin: 0.75rem 0; background: white; border: 1px solid #cbd5e1; border-radius: 0.5rem; }
-.messages pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.messages {
+  display: grid;
+  align-content: start;
+  gap: 0.75rem;
+  max-height: min(52vh, 38rem);
+  padding-right: 0.2rem;
+  overflow-y: auto;
+  overflow-anchor: none;
+  position: relative;
+}
+.message { display: grid; gap: 0.7rem; padding: 1rem 1.05rem; }
+.message header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.message pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 .message-notice { min-height: 1.7em; }
-.message-meta { color: #475569; font-size: 0.8rem; }
+
+.composer { margin-top: 0.25rem; }
+.composer textarea { min-height: 9rem; resize: vertical; }
+.recovery { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+
+@media (max-width: 980px) {
+  .app-shell { width: min(760px, calc(100% - 2rem)); }
+  .stage, .masthead, .panel-heading, .message header { display: grid; }
+  .intro { position: static; }
+  .intro h1 { max-width: none; }
+}

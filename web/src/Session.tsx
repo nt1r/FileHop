@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { ArrowClockwiseIcon, SignInIcon, SignOutIcon } from '@phosphor-icons/react'
 import { Button } from '@cloudflare/kumo/components/button'
+import { Input } from '@cloudflare/kumo/components/input'
+import { LayerCard } from '@cloudflare/kumo/components/layer-card'
+import { Text } from '@cloudflare/kumo/components/text'
 import Messages from './Messages'
 import { useMessages } from './messages'
 
@@ -212,16 +216,39 @@ export default function SessionPage() {
     }
   }
 
-  return <section>
-    <p role="status">{message}</p>
-    {phase === 'authenticated' && <Messages exchange={exchange} />}
-    {phase === 'login' && <form onSubmit={login}>
-      <label>用户名<input autoComplete="username" value={username} onChange={e => setUsername(e.target.value)} required /></label>
-      <label>密码<input type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} required /></label>
-      <Button type="submit" variant="primary" disabled={busy || !retryReady}>登录</Button>
-    </form>}
-    {phase === 'authenticated' && <Button onClick={() => void logout()}>退出登录</Button>}
-    {phase === 'logout-pending' && <Button disabled={busy} onClick={() => void logout()}>重试退出</Button>}
-    {(phase === 'unknown' || phase === 'authenticated') && <Button disabled={busy} onClick={() => void check()}>检查登录状态</Button>}
+  return <section className="workspace">
+    {phase === 'login' && <LayerCard className="panel">
+      <div className="panel-heading">
+        <div>
+          <Text variant="heading3" as="h2">登录</Text>
+          <Text variant="secondary">进入你的私人消息流。</Text>
+        </div>
+      </div>
+      <Text role="status" variant={message.includes('错误') || message.includes('过多') ? 'error' : 'secondary'}>{message}</Text>
+      <form className="login-form" onSubmit={login}>
+        <Input label="用户名" autoComplete="username" value={username} onChange={e => setUsername(e.target.value)} required />
+        <Input label="密码" type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} required />
+        <div className="action-row">
+          <Button type="submit" variant="primary" icon={<SignInIcon />} disabled={busy || !retryReady}>登录</Button>
+        </div>
+      </form>
+    </LayerCard>}
+    {phase !== 'login' && phase !== 'authenticated' && <LayerCard className="panel status-panel">
+      <Text role="status" variant={phase === 'unknown' || phase === 'logout-pending' ? 'error' : 'secondary'}>{message}</Text>
+      <div className="action-row">
+        {phase === 'logout-pending' && <Button variant="primary" icon={<SignOutIcon />} disabled={busy} onClick={() => void logout()}>重试退出</Button>}
+        {phase === 'unknown' && <Button variant="secondary" icon={<ArrowClockwiseIcon />} disabled={busy} onClick={() => void check()}>检查登录状态</Button>}
+      </div>
+    </LayerCard>}
+    {phase === 'authenticated' && <>
+      <div className="panel-heading">
+        <Text role="status" variant="success">{message}</Text>
+        <div className="action-row">
+          <Button variant="ghost" icon={<ArrowClockwiseIcon />} disabled={busy} onClick={() => void check()}>检查登录状态</Button>
+          <Button variant="secondary" icon={<SignOutIcon />} onClick={() => void logout()}>退出登录</Button>
+        </div>
+      </div>
+      <Messages exchange={exchange} />
+    </>}
   </section>
 }
