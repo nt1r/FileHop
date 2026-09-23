@@ -46,7 +46,8 @@ export async function verifySync(page: Page) {
   expect((await repeated).url()).toBe(emptyBoundary)
   await expect(refresh).toBeEnabled()
 
-  // 可控浏览器时钟和可见性是平台边界；消息与分页仍来自真实后端。
+  // install 的时钟仍随真实时间前进；先暂停，避免执行断言本身跨过 Retry-After 边界。
+  // 后续仅用 runFor 推进时间，消息与分页仍来自真实后端。
   const visibility = async (state: 'hidden' | 'visible') => page.evaluate(state => {
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state })
     document.dispatchEvent(new Event('visibilitychange'))
@@ -59,6 +60,8 @@ export async function verifySync(page: Page) {
     else await route.continue()
   })
   await visibility('hidden')
+  // 暂停目标略晚于取时，留出自动化往返时间；隐藏状态下不会提前触发轮询。
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000))
   await page.clock.runFor(60000)
   expect(reads).toBe(0)
   await visibility('visible')

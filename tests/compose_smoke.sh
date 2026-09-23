@@ -1,19 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-for tool in docker cargo node curl mktemp timeout; do command -v "$tool" >/dev/null || { echo "Missing $tool" >&2; exit 1; }; done
+for tool in docker cargo node mktemp timeout realpath; do command -v "$tool" >/dev/null || { echo "Missing $tool" >&2; exit 1; }; done
 root=$(mktemp -d -t filehop-compose-XXXXXXXX)
 project="filehop-test-${root##*-}"
 project=${project,,}
 compose=(docker compose -p "$project" -f "$root/compose.yml")
-pid=
+probe="${project}-probe"
 cleanup() {
-  if [[ -n "$pid" ]]; then kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; fi
+  if docker container inspect "$probe" >/dev/null 2>&1; then
+    docker rm -f "$probe" >/dev/null || return 1
+  fi
   if ! "${compose[@]}" down; then
     echo "Container cleanup failed; preserving $root for manual inspection" >&2
     return 1
   fi
-  [[ "$root" == /tmp/filehop-compose-* ]] && rm -rf -- "$root"
+  [[ "$root" == /tmp/filehop-compose-* && -d "$root" && ! -L "$root" && "$(realpath -- "$root")" == "$root" ]] && rm -rf -- "$root"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
@@ -29,17 +31,25 @@ export FILEHOP_FIXTURE_COMMAND=docker
 FILEHOP_FIXTURE_ARGS=$(node -e 'console.log(JSON.stringify(process.argv.slice(1)))' compose -p "$project" -f "$root/compose.yml" exec -it backend filehop init --username Admin --confirm-paths)
 export FILEHOP_FIXTURE_ARGS
 cargo test --manifest-path backend/Cargo.toml --locked --test initialization initialize_external_fixture -- --ignored --exact
+# 使用已有 Web 镜像中的 Node 探测实际后端容器；应用镜像不增加测试工具。
+mkdir "$root/fixture"
+probe_http() {
+  local container
+  container=$("${compose[@]}" ps -q backend)
+  [[ -n "$container" ]]
+  [[ "$(docker inspect -f '{{len .HostConfig.PortBindings}}' "$container")" == 0 ]]
+  timeout 45 docker run --rm --name "$probe" --user "$(id -u):$(id -g)" \
+    --network "container:$container" \
+    --mount "type=bind,src=$PWD/tests/persistence.mjs,dst=/persistence.mjs,readonly" \
+    --mount "type=bind,src=$root/fixture,dst=/fixture" \
+    --entrypoint node "${FILEHOP_WEB_IMAGE:-filehop-issue6-web}" /persistence.mjs "$1"
+}
+probe_http seed
+"${compose[@]}" restart backend
+probe_http verify
+"${compose[@]}" kill -s SIGKILL backend
+"${compose[@]}" up -d
+probe_http verify
 "${compose[@]}" up -d --force-recreate
-"${compose[@]}" stop
-# Verify persisted data with the public HTTP interface after container recreation.
-cargo build --manifest-path backend/Cargo.toml --locked
-for iteration in 1 2; do
-  backend/target/debug/backend --database-dir "$root/database" --files-dir "$root/files" serve --listen 127.0.0.1:0 >"$root/server.log" 2>"$root/server.err" &
-  pid=$!
-  timeout 15 bash -c 'until grep -q "^listening=" "$1"; do kill -0 "$2" || exit 1; sleep 0.05; done' _ "$root/server.log" "$pid"
-  address=$(grep '^listening=' "$root/server.log"); address=${address#listening=}
-  response=$(curl --fail --silent --show-error --max-time 5 "http://$address/api/status")
-  [[ "$response" == '{"state":"initialized"}' ]]
-  kill -TERM "$pid"; wait "$pid"; pid=
-done
-echo 'Compose initialization, recreation and backend restarts passed.'
+probe_http verify
+echo 'Compose initialization, graceful restart, SIGKILL and recreation persistence passed.'
