@@ -29,12 +29,14 @@ pub struct Config {
     pub origin: String,
     pub trusted_proxy: Option<IpAddr>,
     pub now: Arc<dyn Fn() -> i64 + Send + Sync>,
+    pub transfer: crate::files::TransferConfig,
 }
 impl Default for Config {
     fn default() -> Self {
         Self {
             origin: "https://filehop.invalid".into(),
             trusted_proxy: None,
+            transfer: crate::files::TransferConfig::default(),
             now: Arc::new(|| {
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -51,28 +53,107 @@ struct Attempts {
     pending: usize,
 }
 pub(crate) struct Service {
-    database: PathBuf,
-    files: PathBuf,
+    pub(crate) database: PathBuf,
+    pub(crate) files: PathBuf,
     pub(crate) config: Config,
     verification: Arc<Semaphore>,
     attempts: Mutex<HashMap<IpAddr, Attempts>>,
+    pub(crate) transfers: Arc<crate::files::Transfers>,
 }
 
 pub fn router(database: PathBuf, files: PathBuf, config: Config) -> Router {
+    router_inner(database, files, config, false)
+}
+
+// serve 已经在监听前完成恢复，不可再异步执行第二次协调，否则会误终止新上传。
+pub(crate) fn recovered_router(database: PathBuf, files: PathBuf, config: Config) -> Router {
+    router_inner(database, files, config, true)
+}
+
+fn router_inner(database: PathBuf, files: PathBuf, config: Config, recovered: bool) -> Router {
+    let limit = config.transfer.active_limit;
+    let files_ready = files.clone();
+    let database_ready = database.clone();
+    let transfers = Arc::new(crate::files::Transfers::new(limit));
+    // 测试及嵌入式启动也必须完成协调后才开放上传；未初始化时仅诊断可用。
+    if recovered {
+        transfers
+            .ready
+            .store(true, std::sync::atomic::Ordering::Release);
+    } else {
+        let recovery = transfers.clone();
+        tokio::spawn(async move {
+            if crate::files::recover(&database_ready, &files_ready)
+                .await
+                .is_ok()
+            {
+                recovery
+                    .ready
+                    .store(true, std::sync::atomic::Ordering::Release);
+            }
+        });
+    }
+    let service = Arc::new(Service {
+        database,
+        files,
+        config,
+        verification: Arc::new(Semaphore::new(2)),
+        attempts: Mutex::new(HashMap::new()),
+        transfers,
+    });
+    let maintenance = Arc::downgrade(&service);
+    tokio::spawn(async move {
+        let mut delay = 5u64;
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+            // 路由销毁后不再持有存储句柄，旧协调者不能干扰新实例。
+            let Some(maintenance) = maintenance.upgrade() else {
+                break;
+            };
+            if !maintenance
+                .transfers
+                .ready
+                .load(std::sync::atomic::Ordering::Acquire)
+            {
+                continue;
+            }
+            // 清理失败不释放预留；后台有限退避重试，而不是靠下一次用户请求触发。
+            let result = async {
+                let _guard = maintenance.transfers.gate.lock().await;
+                let mut db = SqliteConnection::connect_with(&crate::storage::options(
+                    &maintenance.database.join("transfer.db"),
+                ))
+                .await?;
+                crate::files::reconcile(&maintenance, &mut db)
+                    .await
+                    .map_err(|_| sqlx::Error::RowNotFound)
+            }
+            .await;
+            delay = if result.is_ok() {
+                5
+            } else {
+                (delay * 2).min(60)
+            };
+        }
+    });
     Router::new()
         .route("/api/session", get(current).post(login).delete(logout))
         .route("/api/sends/{send_id}", get(crate::messages::result))
+        .route("/api/transfer-limits", get(crate::files::limits))
+        .route(
+            "/api/file-sends",
+            axum::routing::post(crate::files::prepare),
+        )
+        .route(
+            "/api/file-sends/{send_id}/attempts/{attempt_id}/content",
+            axum::routing::put(crate::files::content),
+        )
+        .route("/api/files/{file_id}", get(crate::files::download))
         .route(
             "/api/messages",
             get(crate::messages::recent).post(crate::messages::send),
         )
-        .with_state(Arc::new(Service {
-            database,
-            files,
-            config,
-            verification: Arc::new(Semaphore::new(2)),
-            attempts: Mutex::new(HashMap::new()),
-        }))
+        .with_state(service)
 }
 
 pub(crate) fn error(status: StatusCode, code: &str, message: &str) -> Response {
@@ -114,6 +195,16 @@ fn limited(seconds: i64) -> Response {
 }
 
 impl Service {
+    pub(crate) fn for_recovery(database: PathBuf, files: PathBuf) -> Self {
+        Self {
+            database,
+            files,
+            config: Config::default(),
+            verification: Arc::new(Semaphore::new(2)),
+            attempts: Mutex::new(HashMap::new()),
+            transfers: Arc::new(crate::files::Transfers::new(8)),
+        }
+    }
     async fn connection(&self) -> Result<SqliteConnection, Box<Response>> {
         if !matches!(
             crate::storage::inspect(&self.database, &self.files).await,

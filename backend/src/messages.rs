@@ -14,13 +14,25 @@ use std::sync::Arc;
 struct Message {
     id: String,
     send_id: String,
-    text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    text: Option<String>,
     source_label: String,
     created_at: String,
+    kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file_size: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file_mime: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file_state: Option<String>,
 }
 
 // 固定采用 Spec 的 White_Space 集合，不依赖语言默认 trim；BOM 和零宽空格是合法正文。
-fn whitespace(c: char) -> bool {
+pub(crate) fn whitespace(c: char) -> bool {
     matches!(c, '\u{0009}'..='\u{000d}' | '\u{0020}' | '\u{0085}' | '\u{00a0}' | '\u{1680}' | '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}')
 }
 fn json(status: StatusCode, value: impl Serialize) -> Response {
@@ -107,7 +119,9 @@ pub(crate) async fn send(
         // 首条语句即写入，用唯一约束裁决并发，避免先查后写造成两个发送都自认是新消息。
         let inserted = sqlx::query("INSERT INTO message (send_id, text, source_label, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) ON CONFLICT(send_id) DO NOTHING")
             .bind(&input.send_id).bind(&input.text).bind(&input.source_label).execute(&mut *tx).await?.rows_affected() == 1;
-        let message = sqlx::query_as::<_, Message>("SELECT CAST(id AS TEXT) AS id, send_id, text, source_label, created_at FROM message WHERE send_id = ?")
+        // 插入已获得 SQLite 写锁，随后检查文件发送身份；冲突时回滚刚插入的文本。
+        if sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM file_send WHERE send_id=?").bind(&input.send_id).fetch_one(&mut *tx).await? != 0 { return Err(sqlx::Error::RowNotFound); }
+        let message = sqlx::query_as::<_, Message>("SELECT CAST(id AS TEXT) AS id, send_id, CASE WHEN kind='TEXT' THEN text END AS text, source_label, created_at, kind, file_id, file_name, file_size, file_mime, CASE WHEN kind='FILE' THEN 'available' END AS file_state FROM message WHERE send_id = ?")
             .bind(&input.send_id).fetch_one(&mut *tx).await?;
         // 必须等提交成功才可返回成功；5xx 不保证未保存，客户端仍须保留原发送身份。
         tx.commit().await?;
@@ -115,7 +129,9 @@ pub(crate) async fn send(
     }.await;
     match result {
         Ok((_, message))
-            if message.text != input.text || message.source_label != input.source_label =>
+            if message.kind != "TEXT"
+                || message.text.as_deref() != Some(input.text.as_str())
+                || message.source_label != input.source_label =>
         {
             error(
                 StatusCode::CONFLICT,
@@ -131,6 +147,9 @@ pub(crate) async fn send(
             },
             message,
         ),
+        Err(sqlx::Error::RowNotFound) => {
+            error(StatusCode::CONFLICT, "send_conflict", "发送标识已用于文件")
+        }
         Err(_) => unavailable(),
     }
 }
@@ -152,8 +171,13 @@ pub(crate) async fn result(
             "发送标识无效",
         );
     };
-    match sqlx::query_as::<_, Message>("SELECT CAST(id AS TEXT) AS id, send_id, text, source_label, created_at FROM message WHERE send_id = ?")
-        .bind(id.to_string()).fetch_optional(&mut connection).await {
+    committed(&mut connection, &id.to_string()).await
+}
+
+// 传输已在请求开始时认证。传输途中自然到期不应撤销刚提交的成功回执。
+pub(crate) async fn committed(connection: &mut sqlx::SqliteConnection, send_id: &str) -> Response {
+    match sqlx::query_as::<_, Message>("SELECT CAST(id AS TEXT) AS id, send_id, CASE WHEN kind='TEXT' THEN text END AS text, source_label, created_at, kind, file_id, file_name, file_size, file_mime, CASE WHEN kind='FILE' THEN 'available' END AS file_state FROM message WHERE send_id = ?")
+        .bind(send_id).fetch_optional(connection).await {
         Ok(Some(message)) => json(StatusCode::OK, message),
         Ok(None) => error(StatusCode::NOT_FOUND, "send_not_found", "暂未找到发送结果，不代表在途发送不会保存"),
         Err(_) => unavailable(),
@@ -199,7 +223,7 @@ pub(crate) async fn recent(
         let mut tx = connection.begin().await?;
         // 增量从边界后最早记录开始，不能取最近页，否则离线期间超过一页的消息会永久遗漏。
         if let Some(after) = after {
-            let mut messages = sqlx::query_as::<_, Message>("SELECT CAST(id AS TEXT) AS id, send_id, text, source_label, created_at FROM message WHERE id > ? ORDER BY message.id ASC LIMIT ?")
+            let mut messages = sqlx::query_as::<_, Message>("SELECT CAST(id AS TEXT) AS id, send_id, CASE WHEN kind='TEXT' THEN text END AS text, source_label, created_at, kind, file_id, file_name, file_size, file_mime, CASE WHEN kind='FILE' THEN 'available' END AS file_state FROM message WHERE id > ? ORDER BY message.id ASC LIMIT ?")
                 .bind(after).bind(limit + 1).fetch_all(&mut *tx).await?;
             let has_more = messages.len() > limit as usize;
             messages.truncate(limit as usize);
@@ -210,10 +234,10 @@ pub(crate) async fn recent(
         let cursor: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) FROM message").fetch_one(&mut *tx).await?;
         // 历史从排他边界向前取最近一页，多取一条判断是否还有旧记录；新增消息不会挤动旧页。
         let mut messages = if let Some(before) = boundary {
-            sqlx::query_as::<_, Message>("SELECT CAST(id AS TEXT) AS id, send_id, text, source_label, created_at FROM message WHERE id < ? ORDER BY message.id DESC LIMIT ?")
+            sqlx::query_as::<_, Message>("SELECT CAST(id AS TEXT) AS id, send_id, CASE WHEN kind='TEXT' THEN text END AS text, source_label, created_at, kind, file_id, file_name, file_size, file_mime, CASE WHEN kind='FILE' THEN 'available' END AS file_state FROM message WHERE id < ? ORDER BY message.id DESC LIMIT ?")
                 .bind(before).bind(limit + 1).fetch_all(&mut *tx).await?
         } else {
-            sqlx::query_as::<_, Message>("SELECT CAST(id AS TEXT) AS id, send_id, text, source_label, created_at FROM message ORDER BY message.id DESC LIMIT ?")
+            sqlx::query_as::<_, Message>("SELECT CAST(id AS TEXT) AS id, send_id, CASE WHEN kind='TEXT' THEN text END AS text, source_label, created_at, kind, file_id, file_name, file_size, file_mime, CASE WHEN kind='FILE' THEN 'available' END AS file_state FROM message ORDER BY message.id DESC LIMIT ?")
                 .bind(limit + 1).fetch_all(&mut *tx).await?
         };
         let has_older = messages.len() > limit as usize;

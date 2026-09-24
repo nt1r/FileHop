@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 
-export type Message = { id: string; send_id: string; text: string; source_label: string; created_at: string }
+export type Message = { id: string; send_id: string; source_label: string; created_at: string } & (
+  { kind: 'TEXT'; text: string } |
+  { kind: 'FILE'; file_id: string; file_name: string; file_size: number; file_mime: string; file_state: 'available' }
+)
 type Attempt = { send_id: string; text: string; source_label: string; state: 'sending' | 'unknown' | 'checking'; uncertain?: boolean }
 type Model = { draft: string; attempt: Attempt | null; messages: Message[]; syncCursor: string | null; before: string | null; hasOlder: boolean; historyNotice: string; notice: string; reading: boolean }
 const unknownNotice = '结果未确认：正文与发送标识已保留，请主动读取历史确认；不会自动重发。'
@@ -18,11 +21,16 @@ function savedLabel() {
 function isMessage(value: unknown): value is Message {
   if (!value || typeof value !== 'object') return false
   const m = value as Message
-  return typeof m.id === 'string' && /^[1-9][0-9]*$/.test(m.id) && typeof m.send_id === 'string' &&
-    typeof m.text === 'string' && typeof m.source_label === 'string' && typeof m.created_at === 'string'
+  const common = typeof m.id === 'string' && /^[1-9][0-9]*$/.test(m.id) && typeof m.send_id === 'string' &&
+    typeof m.source_label === 'string' && typeof m.created_at === 'string'
+  if (!common) return false
+  if (m.kind === 'TEXT') return typeof m.text === 'string'
+  return m.kind === 'FILE' && typeof m.file_id === 'string' && typeof m.file_name === 'string' &&
+    typeof m.file_size === 'number' && Number.isSafeInteger(m.file_size) && m.file_size >= 0 &&
+    typeof m.file_mime === 'string' && m.file_state === 'available'
 }
 function matches(message: Message, attempt: Attempt) {
-  return message.send_id === attempt.send_id && message.text === attempt.text && message.source_label === attempt.source_label
+  return message.kind === 'TEXT' && message.send_id === attempt.send_id && message.text === attempt.text && message.source_label === attempt.source_label
 }
 class ApiError extends Error {
   status: number
