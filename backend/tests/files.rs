@@ -5,6 +5,7 @@ use axum::{
 };
 use futures_util::TryStreamExt;
 use serde_json::{Value, json};
+use sqlx::Connection;
 use tower::ServiceExt;
 struct Fixture {
     _root: tempfile::TempDir,
@@ -83,6 +84,30 @@ impl Fixture {
         (code, data)
     }
 }
+#[tokio::test]
+async fn fresh_initialization_includes_file_schema_in_first_unreleased_migration() {
+    let f = Fixture::new().await;
+    let path = f._root.path().join("database/transfer.db");
+    let options = sqlx::sqlite::SqliteConnectOptions::new().filename(path);
+    let mut db = sqlx::SqliteConnection::connect_with(&options)
+        .await
+        .unwrap();
+    let versions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations")
+        .fetch_one(&mut db)
+        .await
+        .unwrap();
+    assert_eq!(versions, 1, "首次发布前文件结构应与现有 0001 一起初始化");
+    assert_eq!(
+        f.json("GET", "/api/transfer-limits", Value::Null).await.0,
+        StatusCode::OK
+    );
+    let input = json!({"send_id":uuid::Uuid::new_v4().to_string(),"attempt_id":uuid::Uuid::new_v4().to_string(),"name":"fresh","size":0,"mime":"","source_label":"Web"});
+    assert_eq!(
+        f.json("POST", "/api/file-sends", input).await.0,
+        StatusCode::OK
+    );
+}
+
 #[tokio::test]
 async fn concurrent_reservations_obey_quota_and_text_cannot_reuse_a_file_identity() {
     let root = tempfile::tempdir().unwrap();
