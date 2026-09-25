@@ -16,7 +16,36 @@ export async function verifyMessages(page: Page) {
   await page.getByRole('button', { name: '发送', exact: true }).click()
   await expect(page.getByLabel('正文', { exact: true })).toHaveValue('')
   await expect(page.getByLabel('来源标签')).toHaveValue('Desk')
+  // 通过真实后端准备并上传文件，确认文本工作区在 FILE 混入消息流后仍可读取。
+  const origin = new URL(page.url()).origin
+  const sendId = crypto.randomUUID()
+  const attemptId = crypto.randomUUID()
+  const prepared = await page.request.post('/api/file-sends', { headers: { origin }, data: {
+    send_id: sendId, attempt_id: attemptId, name: 'browser.txt', size: 4,
+    mime: 'text/plain', source_label: 'Web',
+  } })
+  expect(prepared.status()).toBe(200)
+  const uploaded = await page.request.put(`/api/file-sends/${sendId}/attempts/${attemptId}/content`, {
+    headers: { origin, 'content-type': 'application/octet-stream' }, data: Buffer.from('data'),
+  })
+  expect(uploaded.status()).toBe(200)
+  const file = await uploaded.json() as { file_id: string }
   await other.getByRole('button', { name: '读取最近消息' }).click()
+  const attachment = other.getByRole('article').filter({ hasText: 'browser.txt' })
+  await expect(attachment.getByRole('link', { name: '下载附件' })).toHaveAttribute('href', `/api/files/${file.file_id}`)
+  await page.getByRole('button', { name: '读取最近消息' }).click()
+  await expect(page.getByRole('article').filter({ hasText: 'browser.txt' })).toHaveCount(1)
+  const download = await other.request.get(`/api/files/${file.file_id}`)
+  expect(download.status()).toBe(200)
+  expect(await download.body()).toEqual(Buffer.from('data'))
+  // 交给浏览器下载管理器，而非先在页面读取 Blob；稳定版 Chrome 可用同一用例复验。
+  const [saved] = await Promise.all([
+    other.waitForEvent('download'),
+    attachment.getByRole('link', { name: '下载附件' }).click(),
+  ])
+  expect(saved.suggestedFilename()).toBe('browser.txt')
+  expect(await saved.failure()).toBeNull()
+  expect(readFileSync(await saved.path())).toEqual(Buffer.from('data'))
   const message = other.getByRole('article').filter({ hasText: '<b>hello</b>' })
   await expect(message.locator('pre')).toHaveText(text)
   expect(await message.locator('b, a').count()).toBe(0)

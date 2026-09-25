@@ -67,8 +67,14 @@ export default function Messages({ exchange }: { exchange: ReturnType<typeof use
             <Text variant="heading" as="span">{message.source_label}</Text>
             <Text variant="secondary" size="xs" as="time" {...{ dateTime: message.created_at }}>{message.created_at}</Text>
           </header>
-          <Text as="pre">{message.text}</Text>
-          <div><Button variant="ghost" size="sm" icon={<CopyIcon />} onClick={() => void copy(message.text)}>复制正文</Button></div>
+          {message.kind === 'TEXT' ? <>
+            <Text as="pre">{message.text}</Text>
+            <div><Button variant="ghost" size="sm" icon={<CopyIcon />} onClick={() => void copy(message.text)}>复制正文</Button></div>
+          </> : <div>
+            {/* 文件消息不是空文本；只展示元数据，下载交给浏览器处理，不把不可信内容内联渲染。 */}
+            <Text>{message.file_name} · {message.file_size.toLocaleString('zh-CN')} 字节 · {message.file_mime || '未知类型'}</Text>
+            <a href={`/api/files/${encodeURIComponent(message.file_id)}`} download>下载附件</a>
+          </div>}
         </LayerCard>)}
       </div>
     </LayerCard>
