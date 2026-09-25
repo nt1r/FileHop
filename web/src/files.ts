@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { isMessage, normalizeLabel, validLabel, type Message } from './messages'
 
-type Task = { file: File; sendId: string; attemptId: string; name: string; size: number; progress: number; status: string; pending: boolean }
+type Task = { file: File; sendId: string; attemptId: string; previousAttemptId?: string; source: string; name: string; size: number; progress: number; status: string; pending: boolean }
 type Limits = 'loading' | 'unavailable' | number
 const unknown = '结果未确认：请先检查消息历史；本页不会自动重发或更换发送标识。'
 const pendingCleanup = '结果未确认：清理未完成，空间尚未释放；请先检查消息历史。'
@@ -85,7 +85,7 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
     if (selectionVersion !== epoch.current || !live.current || typeof limitsRef.current !== 'number') return
     if (tasksRef.current.some(task => task.pending || uncertain(task))) return
     const source = normalizeLabel(label)
-    const task: Task = { file, sendId: crypto.randomUUID(), attemptId: crypto.randomUUID(), name: file.name,
+    const task: Task = { file, sendId: crypto.randomUUID(), attemptId: crypto.randomUUID(), source, name: file.name,
       size: file.size, progress: 0, status: '准备上传…', pending: true }
     update([...tasksRef.current, task])
     if (file.size > limitsRef.current) { patch(task.sendId, { status: '文件超过服务器单文件上限', pending: false }); return }
@@ -116,7 +116,17 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
         return
       }
       if (value.state !== 'prepared' || value.send_id !== task.sendId || value.attempt_id !== task.attemptId) throw Error()
-      patch(task.sendId, { status: '正在传输…' })
+      transmit(task, version)
+    } catch {
+      if (version === epoch.current && live.current) patch(task.sendId, { status: unknown, pending: false })
+    } finally {
+      window.clearTimeout(timer)
+      if (control.current === preparing) control.current = null
+    }
+  }
+  function transmit(task: Task, version: number) {
+      const { file, source } = task
+      patch(task.sendId, { status: '正在传输…', pending: true, progress: 0 })
       const upload = new XMLHttpRequest()
       xhr.current = upload
       upload.open('PUT', `/api/file-sends/${task.sendId}/attempts/${task.attemptId}/content`)
@@ -151,12 +161,105 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
         if (version === epoch.current && live.current) patch(task.sendId, { status: unknown, pending: false })
       }
       upload.send(file)
-    } catch {
-      if (version === epoch.current && live.current) patch(task.sendId, { status: unknown, pending: false })
-    } finally {
-      window.clearTimeout(timer)
-      if (control.current === preparing) control.current = null
+  }
+  // 未收到响应时先查发送身份；只有服务器确认失败且旧实体清理完成，才允许从头重传。
+  async function inspect(task: Task, retry: boolean) {
+    if (!live.current || task.pending) return
+    const version = epoch.current
+    patch(task.sendId, { status: '正在查询发送结果…', pending: true })
+    const controller = new AbortController()
+    control.current = controller
+    const timer = window.setTimeout(() => controller.abort(), 15000)
+    try {
+      const response = await fetch(`/api/file-sends/${task.sendId}`, { credentials: 'same-origin', cache: 'no-store', signal: controller.signal })
+      if (version !== epoch.current || !live.current) return
+      if (response.headers.has('x-filehop-access-layer')) throw Error()
+      const value = await response.json()
+      if (version !== epoch.current || !live.current) return
+      if (response.status === 401 && value.code === 'session_invalid') { expired.current(); return }
+      if (response.status === 404 && retry && !task.previousAttemptId) {
+        await replayFirst(task, version, controller)
+        return
+      }
+      if (!response.ok || value.send_id !== task.sendId) throw Error()
+      if (value.state === 'success' && isMessage(value.message) && value.message.kind === 'FILE' &&
+        value.message.send_id === task.sendId && value.message.file_name === task.name &&
+        value.message.file_size === task.size && value.message.source_label === task.source) {
+        patch(task.sendId, { status: '上传成功', progress: 100, pending: false })
+        received.current(value.message)
+        return
+      }
+      if (value.attempt_id !== task.attemptId) {
+        if (task.previousAttemptId && value.attempt_id === task.previousAttemptId) {
+          if (value.state === 'failed' && retry) await startSuccessor(task, task.previousAttemptId, version, controller)
+          else patch(task.sendId, { status: value.state === 'cleaning' ? pendingCleanup : unknown, pending: false })
+          return
+        }
+        throw Error()
+      }
+      if (retry && task.previousAttemptId && value.state === 'prepared') {
+        await startSuccessor(task, task.previousAttemptId, version, controller)
+        return
+      }
+      if (value.state === 'prepared' && retry && !task.previousAttemptId) {
+        await replayFirst(task, version, controller)
+        return
+      }
+      if (value.state !== 'failed') {
+        patch(task.sendId, { status: value.state === 'cleaning' ? pendingCleanup : '结果未确认：服务器仍在接收或处理；请稍后查询，不会启动第二次写入。', pending: false })
+        return
+      }
+      if (!retry) { patch(task.sendId, { status: '上传失败，服务器已清理；可明确重试。', pending: false }); return }
+      const next = crypto.randomUUID()
+      // 在发送准备之前保留后继身份：超时后再次点击会重放同一请求，而不是创建第三次尝试。
+      patch(task.sendId, { attemptId: next, previousAttemptId: task.attemptId })
+      await startSuccessor({ ...task, attemptId: next }, task.attemptId, version, controller)
+    } catch { if (version === epoch.current && live.current) patch(task.sendId, { status: unknown, pending: false }) }
+    finally { window.clearTimeout(timer); if (control.current === controller) control.current = null }
+  }
+  async function replayFirst(task: Task, version: number, controller: AbortController) {
+    // 准备响应丢失后仍重放最初的尝试身份；服务器已有准备就继续上传，不创建后继。
+    const response = await fetch('/api/file-sends', { method: 'POST', credentials: 'same-origin', cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
+      body: JSON.stringify({ send_id: task.sendId, attempt_id: task.attemptId, name: task.name,
+        size: task.size, mime: task.file.type, source_label: task.source }) })
+    if (version !== epoch.current || !live.current) return
+    if (response.headers.has('x-filehop-access-layer')) throw Error()
+    const value = await response.json()
+    if (version !== epoch.current || !live.current) return
+    if (response.status === 401 && value.code === 'session_invalid') { expired.current(); return }
+    if (response.ok && value.state === 'prepared' && value.attempt_id === task.attemptId && value.send_id === task.sendId) {
+      transmit(task, version); return
     }
+    throw Error()
+  }
+  async function startSuccessor(task: Task, previous: string, version: number, controller: AbortController) {
+    const response = await fetch(`/api/file-sends/${task.sendId}/attempts`, { method: 'POST', credentials: 'same-origin', cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
+      body: JSON.stringify({ attempt_id: task.attemptId, previous_attempt_id: previous }) })
+    if (version !== epoch.current || !live.current) return
+    if (response.headers.has('x-filehop-access-layer')) throw Error()
+    const value = await response.json()
+    if (version !== epoch.current || !live.current) return
+    if (response.status === 401 && value.code === 'session_invalid') { expired.current(); return }
+    if (response.ok && isMessage(value) && value.kind === 'FILE' && value.send_id === task.sendId) {
+      patch(task.sendId, { status: '上传成功', progress: 100, pending: false }); received.current(value); return
+    }
+    if (response.ok && value.state === 'prepared' && value.attempt_id === task.attemptId && value.send_id === task.sendId) {
+      transmit(task, version); return
+    }
+    if (response.status === 409 && value.code === 'attempt_busy') {
+      patch(task.sendId, { status: pendingCleanup, pending: false }); return
+    }
+    throw Error()
+  }
+  async function query(sendId: string) {
+    const task = tasksRef.current.find(item => item.sendId === sendId)
+    if (task) await inspect(task, false)
+  }
+  async function retry(sendId: string) {
+    const task = tasksRef.current.find(item => item.sendId === sendId)
+    if (task) await inspect(task, true)
   }
   async function download(fileId: string): Promise<string> {
     const version = epoch.current
@@ -178,6 +281,6 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
       return version === epoch.current && live.current ? '无法确认下载请求，请检查网络后重试。' : ''
     }
   }
-  return { tasks, limits, refresh, choose, download, suspend, reset, busy: tasks.some(task => task.pending || uncertain(task)),
+  return { tasks, limits, refresh, choose, query, retry, download, suspend, reset, busy: tasks.some(task => task.pending || uncertain(task)),
     hasUnsaved: () => tasksRef.current.some(task => task.pending || uncertain(task)) }
 }

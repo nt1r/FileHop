@@ -85,6 +85,123 @@ impl Fixture {
     }
 }
 #[tokio::test]
+async fn query_and_successor_are_idempotent_and_old_writer_cannot_commit() {
+    let f = Fixture::new().await;
+    let send = uuid::Uuid::new_v4().to_string();
+    let first = uuid::Uuid::new_v4().to_string();
+    let second = uuid::Uuid::new_v4().to_string();
+    let third = uuid::Uuid::new_v4().to_string();
+    let input = json!({"send_id":send,"attempt_id":first,"name":"retry","size":3,"mime":"","source_label":"Web"});
+    assert_eq!(
+        f.json("GET", &format!("/api/file-sends/{send}"), Value::Null)
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        f.json("POST", "/api/file-sends", input.clone()).await.0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        f.json("GET", &format!("/api/file-sends/{send}"), Value::Null)
+            .await
+            .1["state"],
+        "prepared"
+    );
+    let retry = json!({"attempt_id":second,"previous_attempt_id":first});
+    let path = format!("/api/file-sends/{send}/attempts");
+    assert_eq!(
+        f.json("POST", &path, retry.clone()).await.1["code"],
+        "attempt_busy"
+    );
+    let denied = f
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&path)
+                .header("cookie", &f.cookie)
+                .header("content-type", "application/json")
+                .body(Body::from(retry.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        f.request(
+            "PUT",
+            &format!("/api/file-sends/{send}/attempts/{first}/content"),
+            Body::from("xy")
+        )
+        .await
+        .status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        f.json("GET", &format!("/api/file-sends/{send}"), Value::Null)
+            .await
+            .1["state"],
+        "failed"
+    );
+    assert_eq!(
+        f.json("POST", &path, retry.clone()).await.1["state"],
+        "prepared"
+    );
+    assert_eq!(f.json("POST", &path, retry).await.1["attempt_id"], second);
+    assert_eq!(
+        f.json(
+            "POST",
+            &path,
+            json!({"attempt_id":third,"previous_attempt_id":first})
+        )
+        .await
+        .1["code"],
+        "attempt_conflict"
+    );
+    assert_eq!(
+        f.json("POST", "/api/file-sends", input).await.1["state"],
+        "failed"
+    );
+    assert_ne!(
+        f.request(
+            "PUT",
+            &format!("/api/file-sends/{send}/attempts/{first}/content"),
+            Body::from("abc")
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        f.request(
+            "PUT",
+            &format!("/api/file-sends/{send}/attempts/{second}/content"),
+            Body::from("abc")
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        f.json("GET", &format!("/api/file-sends/{send}"), Value::Null)
+            .await
+            .1["message"]["kind"],
+        "FILE"
+    );
+    assert_eq!(
+        f.json(
+            "POST",
+            &path,
+            json!({"attempt_id":third,"previous_attempt_id":second})
+        )
+        .await
+        .1["kind"],
+        "FILE"
+    );
+}
+#[tokio::test]
 async fn fresh_initialization_includes_file_schema_in_first_unreleased_migration() {
     let f = Fixture::new().await;
     let path = f._root.path().join("database/transfer.db");
