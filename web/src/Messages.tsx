@@ -5,10 +5,13 @@ import { Input, Textarea } from '@cloudflare/kumo/components/input'
 import { LayerCard } from '@cloudflare/kumo/components/layer-card'
 import { Text } from '@cloudflare/kumo/components/text'
 import { type useMessages, validLabel, validText } from './messages'
+import { type useFiles } from './files'
 
-export default function Messages({ exchange }: { exchange: ReturnType<typeof useMessages> }) {
+export default function Messages({ exchange, files }: { exchange: ReturnType<typeof useMessages>; files: ReturnType<typeof useFiles> }) {
   const { model, label } = exchange
   const composing = useRef(false)
+  const picker = useRef<HTMLInputElement>(null)
+  const [downloadNotice, setDownloadNotice] = useState('')
   const [copyNotice, setCopyNotice] = useState('')
   const list = useRef<HTMLDivElement>(null)
   const positioned = useRef(false)
@@ -40,6 +43,11 @@ export default function Messages({ exchange }: { exchange: ReturnType<typeof use
     try { await navigator.clipboard.writeText(text); setCopyNotice('已复制完整正文') }
     catch { setCopyNotice('复制失败，请手动选择正文复制') }
   }
+  async function download(fileId: string) {
+    setDownloadNotice('')
+    const notice = await files.download(fileId)
+    if (notice) setDownloadNotice(notice)
+  }
   const bytes = new TextEncoder().encode(model.draft).length
   return <section className="stream" aria-label="消息流">
     <LayerCard className="panel">
@@ -56,6 +64,7 @@ export default function Messages({ exchange }: { exchange: ReturnType<typeof use
       </div>
       <div className="message-notice" aria-live="polite"><Text variant={(model.historyNotice || model.notice).includes('成功') ? 'success' : model.historyNotice || model.notice ? 'error' : 'secondary'} size="sm">{model.historyNotice || model.notice || ' '}</Text></div>
       <div className="message-notice" aria-live="polite"><Text variant={copyNotice.startsWith('复制失败') ? 'error' : copyNotice ? 'success' : 'secondary'} size="sm">{copyNotice || ' '}</Text></div>
+      {downloadNotice && <Text role="status" variant="error" size="sm">{downloadNotice}</Text>}
       <div className="messages" ref={list} tabIndex={0} aria-label="消息历史" onScroll={() => {
         const element = list.current!
         following.current = element.scrollHeight - element.scrollTop - element.clientHeight < 8
@@ -73,10 +82,28 @@ export default function Messages({ exchange }: { exchange: ReturnType<typeof use
           </> : <div>
             {/* 文件消息不是空文本；只展示元数据，下载交给浏览器处理，不把不可信内容内联渲染。 */}
             <Text>{message.file_name} · {message.file_size.toLocaleString('zh-CN')} 字节 · {message.file_mime || '未知类型'}</Text>
-            <a href={`/api/files/${encodeURIComponent(message.file_id)}`} download>下载附件</a>
+            <a href={`/api/files/${encodeURIComponent(message.file_id)}`} download onClick={event => { event.preventDefault(); void download(message.file_id) }}>下载附件</a>
           </div>}
         </LayerCard>)}
       </div>
+    </LayerCard>
+
+    <LayerCard className="panel upload-panel">
+      <div className="panel-heading"><Text variant="heading3" as="h2">文件交换</Text>
+        <Button variant="secondary" disabled={typeof files.limits !== 'number' || !validLabel(label) || files.busy} onClick={() => picker.current?.click()}>选择文件</Button></div>
+      <input ref={picker} type="file" aria-label="选择要上传的文件" className="file-picker" onChange={event => {
+        const file = event.target.files?.[0]
+        event.target.value = ''
+        if (file) void files.choose(file, label)
+      }} />
+      <Text variant="secondary" size="sm">{typeof files.limits === 'number' ? `单文件上限 ${files.limits.toLocaleString('zh-CN')} 字节；服务器最终确认准入。` :
+        files.limits === 'loading' ? '正在读取服务器文件限制…' : '限制未知或离线，暂不可选择文件。'} 刷新后不会恢复上传；重新选择前请先检查消息历史。</Text>
+      {files.limits === 'unavailable' && <Button variant="ghost" onClick={() => void files.refresh()}>重查文件限制</Button>}
+      {files.tasks.map(task => <div className="upload-task" key={task.sendId}>
+        <Text>{task.name} · {task.size.toLocaleString('zh-CN')} 字节</Text>
+        <progress max={100} value={task.progress} aria-label={`${task.name} 上传进度`} />
+        <Text role="status" variant={task.status === '上传成功' ? 'success' : task.pending ? 'secondary' : 'error'} size="sm">{task.status}</Text>
+      </div>)}
     </LayerCard>
 
     <LayerCard className="panel composer">

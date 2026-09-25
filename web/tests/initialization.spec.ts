@@ -7,6 +7,7 @@ import { verifyHistory } from './history'
 import { verifySync } from './sync'
 import { verifyMessages, verifyMessageSafety } from './messages'
 import { verifySendRecovery } from './send-recovery'
+import { verifyFiles } from './files'
 
 test('administrator initializes storage and the page observes the real status', async ({ page }) => {
   test.setTimeout(90_000)
@@ -83,6 +84,7 @@ test('administrator initializes storage and the page observes the real status', 
   await verifyHistory(page)
   await verifySync(page)
   await verifySendRecovery(page)
+  await verifyFiles(page)
   await verifyLogout(page)
   writeFileSync(resolve(process.env.TEST_FILES!, 'storage-id'), 'mismatched')
   await page.reload()

@@ -18,7 +18,7 @@ const labelKey = 'filehop-source-label'
 function savedLabel() {
   try { const value = localStorage.getItem(labelKey); return value && validLabel(value) ? normalizeLabel(value) : 'Web' } catch { return 'Web' }
 }
-function isMessage(value: unknown): value is Message {
+export function isMessage(value: unknown): value is Message {
   if (!value || typeof value !== 'object') return false
   const m = value as Message
   const common = typeof m.id === 'string' && /^[1-9][0-9]*$/.test(m.id) && typeof m.send_id === 'string' &&
@@ -256,6 +256,7 @@ export function useMessages(active: boolean, onExpired: () => void) {
     return () => window.removeEventListener('beforeunload', leave)
   }, [])
   return { model, label, setLabel, saveLabel, read, send, retry, query, abandon, suspend,
+    receivedFile: (message: Message) => { if (enabled.current) merge([message]) },
     hasUnsaved: () => Boolean(current.current.draft || current.current.attempt),
     draft: (value: string) => { if (!current.current.attempt) update({ ...current.current, draft: value }) } }
 }

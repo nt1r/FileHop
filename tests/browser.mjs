@@ -3,6 +3,7 @@ import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { resolve, extname, sep } from 'node:path'
 import { spawn } from 'node:child_process'
+import { Readable } from 'node:stream'
 
 const deadline = Date.now() + 15000
 let backend
@@ -17,20 +18,19 @@ const root = resolve('web/dist')
 const server = createServer(async (request, response) => {
   try {
     if (request.url.startsWith('/api/')) {
-      const chunks = []
-      for await (const chunk of request) chunks.push(chunk)
       const headers = { ...request.headers }
-      // 一次性回环测试代理：只映射本测试站点的 Origin，错误来源原样交给后端拒绝。
+      // 回环代理只映射本站 Origin；文件体与响应逐块转发，不能用测试代理的内存缓冲掩盖真实流式边界。
       if (headers.origin === `http://localhost:${server.address().port}`) headers.origin = 'https://filehop.invalid'
       delete headers.host
-      delete headers['content-length']
+      const transfer = request.url.includes('/api/files/') || request.url.includes('/api/file-sends/')
       const upstream = await fetch(backend + request.url, {
         method: request.method, headers,
-        ...(chunks.length ? { body: Buffer.concat(chunks) } : {}),
-        signal: AbortSignal.timeout(30000),
+        ...(['POST', 'PUT'].includes(request.method) ? { body: request, duplex: 'half' } : {}),
+        signal: AbortSignal.timeout(transfer ? 31 * 60 * 1000 : 30000),
       })
       response.writeHead(upstream.status, Object.fromEntries(upstream.headers))
-      response.end(Buffer.from(await upstream.arrayBuffer()))
+      if (upstream.body && request.method !== 'HEAD') Readable.fromWeb(upstream.body).pipe(response)
+      else response.end()
     } else {
       const path = resolve(root, '.' + (request.url === '/' ? '/index.html' : new URL(request.url, 'http://localhost').pathname))
       if (!path.startsWith(root + sep)) { response.writeHead(403); response.end(); return }

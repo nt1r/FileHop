@@ -6,14 +6,14 @@
 
 ## 当前实现状态
 
-当前开发切片支持隔离启动、显式初始化、安全登录恢复、退出及管理员撤销登录，以及文本发送／主动读取／复制、历史分页、未知发送恢复和前台增量同步闭环：
+当前开发切片支持隔离启动、显式初始化、安全登录恢复、退出及管理员撤销登录，以及文本发送／主动读取／复制、历史分页、未知发送恢复、前台增量同步和桌面单文件交换闭环：
 
-- `web/`：Vite + React + TypeScript + Kumo standalone 样式，初始化状态页面、安全登录、受保护的文本消息页、同页重新登录及同源标签页退出通知。
+- `web/`：Vite + React + TypeScript + Kumo standalone 样式，初始化状态页面、安全登录、受保护的消息工作区、同页重新登录及同源标签页退出通知。工作区支持单文件自动上传和附件下载，尚无多选队列。
 - `backend/`：Axum + Tokio + SQLx SQLite；显式 `init` / `reset-password` 管理命令、存储标识与账户迁移、`GET /api/status`、`POST /api/session`、`GET /api/session`、`DELETE /api/session`、`POST /api/messages`、最近页、before 历史分页及 after 增量分页 `GET /api/messages`、发送结果 `GET /api/sends/{send_id}`。
 - `deploy/`：开发应用 Compose、容器构建文件及共享 Caddy 站点示例。
 - `GET /internal/live` 仅返回 204，表示进程可响应；**不是数据库可用或业务就绪检查**。不通过公网入口开放。
 
-状态查询仅返回 `uninitialized`、`initialized` 或 `storage_error`，禁止缓存且不泄露目录、账户或凭证。未初始化与存储异常不开放业务写入。文件、Android 及正式发布尚未实现；初始化成功不代表整个 Spec 001 已完成。GitHub 托管 CI 定义见 `.github/workflows/check.yml`，实际执行结果以对应提交的 Actions 检查为准。
+状态查询仅返回 `uninitialized`、`initialized` 或 `storage_error`，禁止缓存且不泄露目录、账户或凭证。未初始化与存储异常不开放业务写入。文件单选上传与附件下载已实现；多选队列、状态查询/停止/同次重试、文件管理、Android 及正式发布尚未实现；初始化成功不代表整个 Spec 001 已完成。GitHub 托管 CI 定义见 `.github/workflows/check.yml`，实际执行结果以对应提交的 Actions 检查为准。
 
 ## 工具链与本地检查
 
@@ -160,7 +160,7 @@ docker compose --env-file .env -f deploy/compose.dev.yml exec backend \
 
 `--confirm-paths` 表示操作者已确认上述两个路径；不代表允许覆盖。用户名为 3–32 个 ASCII 字母、数字、`_`、`-`，保存时转小写；密码为 12–128 个 Unicode 码点，不 trim。初始化成功后在页面点击“刷新状态”，无需重启后端。
 
-单文件后端配置：`FILEHOP_MAX_FILE_BYTES` 默认 104857600、`FILEHOP_FILE_QUOTA_BYTES` 默认 1073741824；`FILEHOP_TRANSFER_ACTIVE_LIMIT` 默认 8（分别限制同时上传、下载和准备请求）；`FILEHOP_DISK_RESERVE_BYTES` 默认 67108864。未开始的准备与最近一小时的申请记录合计最多 64 项（也覆盖零字节申请），满额或准入竞争时返回 429，不排无限等待队列。准备请求体最多 8 KiB、读取期限 15 秒；`FILEHOP_PREPARE_TIMEOUT_SECS` 默认 120，`FILEHOP_UPLOAD_IDLE_SECS` 默认 120，`FILEHOP_UPLOAD_TOTAL_SECS` 默认 1800，`FILEHOP_DOWNLOAD_IDLE_SECS` 默认 120。下载每条活动流最多缓存两个 64 KiB 块；后台清理默认每 5 秒协调最多 64 项，失败退避至 60 秒。这些参数以小型 VPS 上有限并发、保留 64 MiB 磁盘余量为起点，不代替目标机器的实际空间及内存验证；本票未提供桌面上传入口；浏览器自动化仅验证文件消息与附件下载。隔离 Caddy HTTPS 入口已验证持续 16 秒的分块请求（`bash tests/caddy_ingress.sh`），后端也验证了超过 15 秒的上传；后续桌面上传客户端仍须单独配置文件体期限与进度。可用 `FILEHOP_TEST_CHROME=1 bash tests/browser.sh` 在安装了稳定版 Chrome 的机器上验证真实浏览器下载（默认运行 Playwright Chromium）；本地回环及自签名隔离入口不代替正式环境验收。文件表与消息类型现合入尚未进入 `main` 的 `0001_next_release.sql`，从全新实例初始化并测试，不宣称提供从旧 `0001` 的升级路径。若开发实例已应用旧版 `0001`，其 checksum 已改变；普通 `serve` 不会升级它，也不得自动清理或重写 checksum。只有操作者确认实例可丢弃并核对数据库和文件目录后才能显式重建；需保留数据的实例须等待独立升级入口，不能用 `init` 代替。
+单文件后端配置：`FILEHOP_MAX_FILE_BYTES` 默认 104857600、`FILEHOP_FILE_QUOTA_BYTES` 默认 1073741824；`FILEHOP_TRANSFER_ACTIVE_LIMIT` 默认 8（分别限制同时上传、下载和准备请求）；`FILEHOP_DISK_RESERVE_BYTES` 默认 67108864。未开始的准备与最近一小时的申请记录合计最多 64 项（也覆盖零字节申请），满额或准入竞争时返回 429，不排无限等待队列。准备请求体最多 8 KiB、读取期限 15 秒；`FILEHOP_PREPARE_TIMEOUT_SECS` 默认 120，`FILEHOP_UPLOAD_IDLE_SECS` 默认 120，`FILEHOP_UPLOAD_TOTAL_SECS` 默认 1800，`FILEHOP_DOWNLOAD_IDLE_SECS` 默认 120。下载每条活动流最多缓存两个 64 KiB 块；后台清理默认每 5 秒协调最多 64 项，失败退避至 60 秒。这些参数以小型 VPS 上有限并发、保留 64 MiB 磁盘余量为起点，不代替目标机器的实际空间及内存验证；桌面上传现使用 XHR 直接发送 File，实时显示上传字节进度，数据到 100% 后仍等待提交响应；控制请求设 15 秒期限，上传体独立设 31 分钟客户端期限（服务端最多 30 分钟），下载交给浏览器原生管理器。选择前及选择后重新查询有效单文件限制；未知/离线不启动上传。结果未知时不自动重发，不创建新身份，暂停继续选择；刷新后不恢复任务，应先检查消息历史。登录到期隐藏任务并保留本页引用，主动退出中止本页传输并清空引用；服务器超时清理仍是兜底。按尝试停止、查询、同页恢复协调与多文件队列由后续票实现。隔离 Caddy HTTPS 入口验证实际 PUT 路由持续 16 秒分块及附件路由认证（`bash tests/caddy_ingress.sh`）；浏览器验证真实后端的单文件交换和响应丢失。隔离入口与 Playwright Chromium 不代替真实 HTTPS、稳定版 Chrome 和长文件体的人工验收。可用 `FILEHOP_TEST_CHROME=1 bash tests/browser.sh` 在安装了稳定版 Chrome 的机器上验证真实浏览器下载（默认运行 Playwright Chromium）；本地回环及自签名隔离入口不代替正式环境验收。文件表与消息类型现合入尚未进入 `main` 的 `0001_next_release.sql`，从全新实例初始化并测试，不宣称提供从旧 `0001` 的升级路径。若开发实例已应用旧版 `0001`，其 checksum 已改变；普通 `serve` 不会升级它，也不得自动清理或重写 checksum。只有操作者确认实例可丢弃并核对数据库和文件目录后才能显式重建；需保留数据的实例须等待独立升级入口，不能用 `init` 代替。
 
 数据库位于 `database/transfer.db`；两个根目录各有 `storage-id`，数据库也保存同一标识。使用 SQLite WAL + synchronous=FULL、事务、版本迁移与 Argon2id 随机盐哈希。初始化以目录排他锁协调并发，拒绝非空目录、重复/部分初始化及嵌套目录。普通检查不建库、不执行迁移；标识缺失、不匹配、数据库丢失或访问失败返回存储异常。
 

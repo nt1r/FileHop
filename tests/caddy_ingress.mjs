@@ -12,7 +12,7 @@ const listen = async server => { server.listen(0, '127.0.0.1'); await once(serve
 const observed = req => ({ authorization: req.headers.authorization ?? null, clientIp: req.headers['x-filehop-client-ip'] ?? null })
 // 上游探针只验证反向代理的公开 HTTP 边界，不模拟应用认证或存储规则。
 const upstream = http.createServer((req, res) => {
-  if (req.url === '/api/file-transfer-probe') {
+  if (req.url === '/api/file-sends/probe/attempts/probe/content') {
     let bytes = 0
     req.on('data', chunk => { bytes += chunk.length })
     req.on('end', () => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ bytes })) })
@@ -85,8 +85,8 @@ https://localhost:${port} {
   assert.equal((await request('/internal/live', { authorization: auth })).status, 404)
   // 独立 HTTPS 入口不能沿用 JSON 请求的 15 秒整体期限；上游逐块接收文件体。
   const streamed = new Promise((resolve, reject) => {
-    const req = https.request({ host: '127.0.0.1', port, path: '/api/file-transfer-probe',
-      method: 'POST', ca, headers: { Host: `localhost:${port}`, authorization: auth } }, res => {
+    const req = https.request({ host: '127.0.0.1', port, path: '/api/file-sends/probe/attempts/probe/content',
+      method: 'PUT', ca, headers: { Host: `localhost:${port}`, authorization: auth, Origin: `https://localhost:${port}` } }, res => {
       let body = ''; res.on('data', b => { body += b }); res.on('end', () => resolve({ status: res.statusCode, body }))
     })
     req.on('error', reject)
@@ -94,6 +94,11 @@ https://localhost:${port} {
     setTimeout(() => { req.end(Buffer.alloc(65536)) }, 16000)
   })
   assert.deepEqual(await streamed, { status: 200, body: JSON.stringify({ bytes: 131072 }) })
+  for (const path of ['/api/file-sends/probe/attempts/probe/content', '/api/files/probe']) {
+    const res = await request(path)
+    assert.equal(res.status, 401)
+    assert.equal(res.headers['x-filehop-access-layer'], 'development')
+  }
   const upgrade = { Connection: 'Upgrade', Upgrade: 'websocket', 'Sec-WebSocket-Version': '13', 'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==' }
   assert.equal((await request('/', upgrade)).status, 401)
   assert.equal((await request('/', { ...upgrade, authorization: 'Basic d3Jvbmc6d3Jvbmc=' })).status, 401)
