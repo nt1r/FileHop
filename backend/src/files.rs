@@ -124,7 +124,7 @@ async fn cleanup(service: &Service, db: &mut SqliteConnection, send: &str, file_
             Err(_) => return false,
         };
         if sqlx::query(
-            "UPDATE file_send SET state='failed',reserved=0 WHERE send_id=? AND state='cleaning'",
+            "UPDATE file_send SET state=CASE WHEN EXISTS (SELECT 1 FROM file_attempt_marker WHERE attempt_id=file_send.attempt_id AND stopped=1) THEN 'stopped' ELSE 'failed' END,reserved=0 WHERE send_id=? AND state='cleaning'",
         )
         .bind(send)
         .execute(&mut *tx)
@@ -134,7 +134,7 @@ async fn cleanup(service: &Service, db: &mut SqliteConnection, send: &str, file_
             return false;
         }
         if sqlx::query(
-            "UPDATE file_attempt SET state='failed' WHERE send_id=? AND state IN ('prepared','writing','cleaning')",
+            "UPDATE file_attempt SET state=CASE WHEN EXISTS (SELECT 1 FROM file_attempt_marker WHERE attempt_id=file_attempt.attempt_id AND stopped=1) THEN 'stopped' ELSE 'failed' END WHERE send_id=? AND state IN ('prepared','writing','cleaning')",
         )
         .bind(send)
         .execute(&mut *tx)
@@ -478,7 +478,7 @@ pub(crate) async fn prepare(
             .await?
             .ok_or(sqlx::Error::RowNotFound)?;
             // 同一标识只重放原尝试的状态，不再次预留或激活已经终结的尝试。
-            if attempt_state == "failed" || attempt_state == "cleaning" {
+            if attempt_state == "failed" || attempt_state == "cleaning" || attempt_state == "stopped" {
                 return Ok((attempt_state, attempt));
             }
             if attempt_state != state {
@@ -486,15 +486,24 @@ pub(crate) async fn prepare(
             }
             state
         } else {
-            // SQLite 的写事务将额度核算与申请串行化；失败不会留下半条预留。
             if sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM message WHERE send_id=?")
-                .bind(&send)
-                .fetch_one(&mut *tx)
-                .await?
-                != 0
-            {
-                return Err(sqlx::Error::RowNotFound);
+                .bind(&send).fetch_one(&mut *tx).await? != 0 { return Err(sqlx::Error::RowNotFound) }
+            // 已被首次尝试占用的发送身份不能再被另一首次准备抢走；
+            // 后继的停止标记尚不决定首次文件元数据。
+            if sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM file_attempt_marker WHERE send_id=? AND attempt_id!=? AND is_first=1")
+                .bind(&send).bind(&attempt).fetch_one(&mut *tx).await? != 0 { return Err(sqlx::Error::RowNotFound) }
+            // 迟到准备不得使已持久停止的身份重新激活，也不能凭停止标记猜出元数据。
+            let stopped: Option<(String, Option<String>, i64)> = sqlx::query_as("SELECT send_id,previous_attempt_id,stopped FROM file_attempt_marker WHERE attempt_id=?")
+                .bind(&attempt).fetch_optional(&mut *tx).await?;
+            if let Some((owner, predecessor, stopped)) = stopped {
+                if owner != send || predecessor.is_some() { return Err(sqlx::Error::RowNotFound) }
+                if stopped != 1 { return Err(sqlx::Error::RowNotFound) }
+                sqlx::query("UPDATE file_attempt_marker SET is_first=1 WHERE attempt_id=?")
+                    .bind(&attempt).execute(&mut *tx).await?;
+                tx.commit().await?;
+                return Ok(("stopped".into(), attempt));
             }
+            // SQLite 的写事务将额度核算与申请串行化；失败不会留下半条预留。
             if p.size > service.config.transfer.max_file_size {
                 tx.rollback().await?;
                 return Ok(("file_too_large".into(), String::new()));
@@ -530,6 +539,8 @@ pub(crate) async fn prepare(
                 return Err(sqlx::Error::RowNotFound);
             }
             let file = Uuid::new_v4().to_string();
+            sqlx::query("INSERT INTO file_attempt_marker (attempt_id,send_id,is_first,stopped) VALUES (?,?,1,0)")
+                .bind(&attempt).bind(&send).execute(&mut *tx).await?;
             sqlx::query(
                 "INSERT INTO file_send VALUES (?,?,?,?,?,?,?, 'prepared', ?, strftime('%s','now'))",
             )
@@ -610,7 +621,25 @@ pub(crate) async fn send_status(
             Err(_) => return unavailable(),
         };
     let Some((state, attempt)) = row else {
-        return error(StatusCode::NOT_FOUND, "send_not_found", "发送不存在");
+        // 文件元数据还未登记时，只能报告明确的单个停止标记；
+        // 多个预先到达的停止身份没有前驱顺序，不能猜哪个是当前尝试。
+        let markers: Vec<String> = match sqlx::query_scalar(
+            "SELECT attempt_id FROM file_attempt_marker WHERE send_id=? AND stopped=1 LIMIT 2",
+        )
+        .bind(&send)
+        .fetch_all(&mut db)
+        .await
+        {
+            Ok(v) => v,
+            Err(_) => return unavailable(),
+        };
+        return match markers.as_slice() {
+            [attempt] => json(
+                StatusCode::OK,
+                serde_json::json!({"state":"stopped","send_id":send,"attempt_id":attempt}),
+            ),
+            _ => error(StatusCode::NOT_FOUND, "send_not_found", "发送不存在"),
+        };
     };
     if state == "success" {
         let response = crate::messages::committed(&mut db, &send).await;
@@ -630,9 +659,23 @@ pub(crate) async fn send_status(
             serde_json::json!({"state":state,"send_id":send,"attempt_id":attempt,"message":message}),
         );
     }
+    let stop_requested = if state == "cleaning" {
+        match sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM file_attempt_marker WHERE attempt_id=? AND stopped=1",
+        )
+        .bind(&attempt)
+        .fetch_one(&mut db)
+        .await
+        {
+            Ok(count) => count != 0,
+            Err(_) => return unavailable(),
+        }
+    } else {
+        false
+    };
     json(
         StatusCode::OK,
-        serde_json::json!({"state":state,"send_id":send,"attempt_id":attempt}),
+        serde_json::json!({"state":state,"send_id":send,"attempt_id":attempt,"stop_requested":stop_requested}),
     )
 }
 
@@ -641,6 +684,15 @@ pub(crate) async fn send_status(
 pub(crate) struct NextAttempt {
     attempt_id: String,
     previous_attempt_id: String,
+    // 首次准备可能从未登记元数据；此时后继补齐固定载荷。
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    size: Option<i64>,
+    #[serde(default)]
+    mime: Option<String>,
+    #[serde(default)]
+    source_label: Option<String>,
 }
 
 pub(crate) async fn successor(
@@ -718,14 +770,94 @@ pub(crate) async fn successor(
         sqlx::query("UPDATE instance SET storage_id=storage_id WHERE singleton=1").execute(&mut *tx).await?;
         let row: Option<(String, String, i64)> = sqlx::query_as("SELECT state,attempt_id,size FROM file_send WHERE send_id=?")
             .bind(&send).fetch_optional(&mut *tx).await?;
-        let Some((state, current, size)) = row else { return Ok("not_found".into()) };
+        let Some((state, current, size)) = row else {
+            // 纯停止标记没有文件元数据；首次真正准备由后继请求补齐并锁定。
+            let owner: Option<String> = sqlx::query_scalar("SELECT send_id FROM file_attempt_marker WHERE attempt_id=?")
+                .bind(&previous).fetch_optional(&mut *tx).await?;
+            if owner.as_deref() != Some(&send) { return Ok("not_found".into()) }
+            let (Some(name), Some(size), Some(mime), Some(label)) = (&next.name, next.size, &next.mime, &next.source_label) else { return Ok("invalid_metadata".into()) };
+            let label = label.trim_matches(crate::messages::whitespace);
+            if name.is_empty() || name.len() > 1024 || name.contains('\0') || size < 0 || mime.len() > 255 || !(1..=64).contains(&label.chars().count()) { return Ok("invalid_metadata".into()) }
+            if sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM message WHERE send_id=?").bind(&send).fetch_one(&mut *tx).await? != 0 { return Ok("conflict".into()) }
+            let existing: Option<(String, Option<String>)> = sqlx::query_as("SELECT send_id,previous_attempt_id FROM file_attempt_marker WHERE attempt_id=?")
+                .bind(&attempt).fetch_optional(&mut *tx).await?;
+            if existing.as_ref().is_some_and(|(owner, prev)| owner != &send || prev.as_deref().is_some_and(|v| v != previous)) { return Ok("conflict".into()) }
+            let sibling: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM file_attempt_marker WHERE send_id=? AND previous_attempt_id=? AND attempt_id!=?")
+                .bind(&send).bind(&previous).bind(&attempt).fetch_one(&mut *tx).await?;
+            if sibling != 0 { return Ok("conflict".into()) }
+            if existing.is_some() {
+                // 后继停止先到也须记录唯一前驱，不要求它先申请额度。
+                sqlx::query("UPDATE file_attempt_marker SET previous_attempt_id=? WHERE attempt_id=? AND previous_attempt_id IS NULL")
+                    .bind(&previous).bind(&attempt).execute(&mut *tx).await?;
+                let file = Uuid::new_v4().to_string();
+                sqlx::query("INSERT INTO file_send VALUES (?,?,?,?,?,?,?,?,?,strftime('%s','now'))")
+                    .bind(&send).bind(&attempt).bind(&file).bind(name).bind(size).bind(mime).bind(label).bind("stopped").bind(0)
+                    .execute(&mut *tx).await?;
+                sqlx::query("INSERT INTO file_attempt (attempt_id,send_id,state) VALUES (?,?,'stopped')")
+                    .bind(&previous).bind(&send).execute(&mut *tx).await?;
+                sqlx::query("INSERT INTO file_attempt (attempt_id,send_id,state) VALUES (?,?,'stopped')")
+                    .bind(&attempt).bind(&send).execute(&mut *tx).await?;
+                tx.commit().await?;
+                return Ok("stopped".into());
+            }
+            if size > service.config.transfer.max_file_size { return Ok("file_too_large".into()) }
+            let pending: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM file_send WHERE state='prepared' OR prepared_at >= strftime('%s','now') - 3600")
+                .fetch_one(&mut *tx).await?;
+            if pending >= 64 { return Ok("busy_limit".into()) }
+            let used: i64 = sqlx::query_scalar("SELECT COALESCE(SUM(reserved),0) FROM file_send").fetch_one(&mut *tx).await?;
+            if size > service.config.transfer.quota || used > service.config.transfer.quota - size { return Ok("quota_exceeded".into()) }
+            let available = fs2::available_space(&service.files).map_err(sqlx::Error::Io)?;
+            if available < (size as u64).saturating_add(service.config.transfer.disk_reserve) { return Ok("disk_full".into()) }
+            sqlx::query("INSERT INTO file_attempt_marker (attempt_id,send_id,previous_attempt_id,stopped) VALUES (?,?,?,0)")
+                .bind(&attempt).bind(&send).bind(&previous).execute(&mut *tx).await?;
+            let file = Uuid::new_v4().to_string();
+            let state = "prepared";
+            sqlx::query("INSERT INTO file_send VALUES (?,?,?,?,?,?,?,?,?,strftime('%s','now'))")
+                .bind(&send).bind(&attempt).bind(&file).bind(name).bind(size).bind(mime).bind(label).bind(state).bind(size)
+                .execute(&mut *tx).await?;
+            sqlx::query("INSERT INTO file_attempt (attempt_id,send_id,state) VALUES (?,?,'stopped')")
+                .bind(&previous).bind(&send).execute(&mut *tx).await?;
+            sqlx::query("INSERT INTO file_attempt (attempt_id,send_id,state) VALUES (?,?,?)")
+                .bind(&attempt).bind(&send).bind(state).execute(&mut *tx).await?;
+            tx.commit().await?;
+            return Ok(state.into());
+        };
         if state == "success" { return Ok(state) }
+        let metadata: (String, i64, String, String) = sqlx::query_as("SELECT name,size,mime,source_label FROM file_send WHERE send_id=?")
+            .bind(&send).fetch_one(&mut *tx).await?;
+        if next.name.as_ref().is_some_and(|v| v != &metadata.0)
+            || next.size.is_some_and(|v| v != metadata.1)
+            || next.mime.as_ref().is_some_and(|v| v != &metadata.2)
+            || next.source_label.as_ref().is_some_and(|v| v.trim_matches(crate::messages::whitespace) != metadata.3)
+        { return Ok("conflict".into()) }
         let replay: Option<String> = sqlx::query_scalar("SELECT state FROM file_attempt WHERE attempt_id=? AND send_id=?")
             .bind(&attempt).bind(&send).fetch_optional(&mut *tx).await?;
         if let Some(replay) = replay { return Ok(replay) }
+        if sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM file_attempt_marker WHERE attempt_id=? AND send_id!=?")
+            .bind(&attempt).bind(&send).fetch_one(&mut *tx).await? != 0 { return Ok("conflict".into()) }
         if current != previous { return Ok("conflict".into()) }
-        if state != "failed" { return Ok("busy".into()) }
+        if state != "failed" && state != "stopped" { return Ok("busy".into()) }
+        let existing: Option<(String, Option<String>)> = sqlx::query_as("SELECT send_id,previous_attempt_id FROM file_attempt_marker WHERE attempt_id=?")
+            .bind(&attempt).fetch_optional(&mut *tx).await?;
+        if existing.as_ref().is_some_and(|(owner, prev)| owner != &send || prev.as_deref().is_some_and(|v| v != previous)) { return Ok("conflict".into()) }
+        let sibling: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM file_attempt_marker WHERE send_id=? AND previous_attempt_id=? AND attempt_id!=?")
+            .bind(&send).bind(&previous).bind(&attempt).fetch_one(&mut *tx).await?;
+        if sibling != 0 { return Ok("conflict".into()) }
+        if existing.is_some() {
+            // 已持久停止的后继只能作为终结身份登记；没有额度申请或写入资格。
+            sqlx::query("UPDATE file_attempt_marker SET previous_attempt_id=? WHERE attempt_id=? AND previous_attempt_id IS NULL")
+                .bind(&previous).bind(&attempt).execute(&mut *tx).await?;
+            sqlx::query("UPDATE file_send SET attempt_id=?,state='stopped',reserved=0 WHERE send_id=? AND attempt_id=? AND state IN ('failed','stopped')")
+                .bind(&attempt).bind(&send).bind(&previous).execute(&mut *tx).await?;
+            sqlx::query("INSERT INTO file_attempt (attempt_id,send_id,state) VALUES (?,?,'stopped')")
+                .bind(&attempt).bind(&send).execute(&mut *tx).await?;
+            tx.commit().await?;
+            return Ok("stopped".into());
+        }
         if size > service.config.transfer.max_file_size { return Ok("file_too_large".into()) }
+        let pending: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM file_send WHERE state='prepared' OR prepared_at >= strftime('%s','now') - 3600")
+            .fetch_one(&mut *tx).await?;
+        if pending >= 64 { return Ok("busy_limit".into()) }
         let used: i64 = sqlx::query_scalar("SELECT COALESCE(SUM(reserved),0) FROM file_send")
             .fetch_one(&mut *tx).await?;
         if size > service.config.transfer.quota || used > service.config.transfer.quota - size { return Ok("quota_exceeded".into()) }
@@ -733,9 +865,16 @@ pub(crate) async fn successor(
         if available < (size as u64).saturating_add(service.config.transfer.disk_reserve) { return Ok("disk_full".into()) }
         let taken: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM file_attempt WHERE attempt_id=?").bind(&attempt).fetch_one(&mut *tx).await?;
         if taken != 0 { return Ok("conflict".into()) }
+        // 已停止的后继可能先于准备登记；只能在同一前驱上重放，不能新造第三次尝试。
+        let marker: Option<(String, Option<String>)> = sqlx::query_as("SELECT send_id,previous_attempt_id FROM file_attempt_marker WHERE attempt_id=?")
+            .bind(&attempt).fetch_optional(&mut *tx).await?;
+        if marker.as_ref().is_some_and(|(owner, prev)| owner != &send || prev.as_deref().is_some_and(|v| v != previous)) { return Ok("conflict".into()) }
+        let sibling: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM file_attempt_marker WHERE send_id=? AND previous_attempt_id=? AND attempt_id!=?")
+            .bind(&send).bind(&previous).bind(&attempt).fetch_one(&mut *tx).await?;
+        if sibling != 0 { return Ok("conflict".into()) }
         // 每次重传使用新实体；旧实体即使迟到也只属于旧尝试，不会被复用。
         let file = Uuid::new_v4().to_string();
-        sqlx::query("UPDATE file_send SET attempt_id=?,file_id=?,state='prepared',reserved=size,prepared_at=strftime('%s','now') WHERE send_id=? AND attempt_id=? AND state='failed'")
+        sqlx::query("UPDATE file_send SET attempt_id=?,file_id=?,state='prepared',reserved=size,prepared_at=strftime('%s','now') WHERE send_id=? AND attempt_id=? AND state IN ('failed','stopped')")
             .bind(&attempt).bind(&file).bind(&send).bind(&previous).execute(&mut *tx).await?;
         sqlx::query("INSERT INTO file_attempt (attempt_id,send_id,state) VALUES (?,?,'prepared')")
             .bind(&attempt).bind(&send).execute(&mut *tx).await?;
@@ -744,12 +883,22 @@ pub(crate) async fn successor(
     }.await;
     match result {
         Ok(state) if state == "success" => crate::messages::committed(&mut db, &send).await,
+        Ok(state) if state == "invalid_metadata" => error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_metadata",
+            "无效文件元数据",
+        ),
         Ok(state) if state == "not_found" => {
             error(StatusCode::NOT_FOUND, "send_not_found", "发送不存在")
         }
         Ok(state) if state == "conflict" => {
             error(StatusCode::CONFLICT, "attempt_conflict", "传输尝试不匹配")
         }
+        Ok(state) if state == "busy_limit" => error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "transfer_busy",
+            "准备请求过多",
+        ),
         Ok(state) if state == "busy" => {
             error(StatusCode::CONFLICT, "attempt_busy", "尝试仍在进行或清理中")
         }
@@ -771,6 +920,104 @@ pub(crate) async fn successor(
             serde_json::json!({"state":state,"send_id":send,"attempt_id":attempt}),
         ),
         Err(_) => unavailable(),
+    }
+}
+
+// 停止不依赖 HTTP abort：只有持久裁决禁止提交后才能报告停止，写入者退出前仍占额度。
+pub(crate) async fn stop(
+    State(service): State<Arc<Service>>,
+    headers: HeaderMap,
+    Path((send, attempt)): Path<(String, String)>,
+) -> Response {
+    if !write_origin_allowed(&service, &headers) {
+        return error(StatusCode::FORBIDDEN, "origin_rejected", "请求来源不被允许");
+    }
+    let (mut db, _) = match authenticate(&service, &headers).await {
+        Ok(v) => v,
+        Err(e) => return *e,
+    };
+    let (Some(send), Some(attempt)) = (id(&send), id(&attempt)) else {
+        return error(StatusCode::UNPROCESSABLE_ENTITY, "invalid_id", "无效标识");
+    };
+    if !service
+        .transfers
+        .ready
+        .load(std::sync::atomic::Ordering::Acquire)
+    {
+        return unavailable();
+    }
+    let result: Result<&str, sqlx::Error> = async {
+        let mut tx = db.begin().await?;
+        sqlx::query("UPDATE instance SET storage_id=storage_id WHERE singleton=1").execute(&mut *tx).await?;
+        let state: Option<(String, String)> = sqlx::query_as("SELECT state,attempt_id FROM file_send WHERE send_id=?")
+            .bind(&send).fetch_optional(&mut *tx).await?;
+        if state.as_ref().is_some_and(|(state, _)| state == "success") { return Ok("success") }
+        if state.is_none() && sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM message WHERE send_id=?")
+            .bind(&send).fetch_one(&mut *tx).await? != 0 { return Ok("conflict") }
+        if state.is_none() && sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM file_attempt_marker WHERE send_id=? AND attempt_id!=? AND is_first=1")
+            .bind(&send).bind(&attempt).fetch_one(&mut *tx).await? != 0 { return Ok("conflict") }
+        let owner: Option<String> = sqlx::query_scalar("SELECT send_id FROM file_attempt_marker WHERE attempt_id=?")
+            .bind(&attempt).fetch_optional(&mut *tx).await?;
+        let recorded: Option<String> = sqlx::query_scalar("SELECT send_id FROM file_attempt WHERE attempt_id=?")
+            .bind(&attempt).fetch_optional(&mut *tx).await?;
+        if owner.as_deref().is_some_and(|s| s != send) || recorded.as_deref().is_some_and(|s| s != send) { return Ok("conflict") }
+        if owner.is_none() {
+            // 后继的停止也可能先于准备到达；先记身份，不猜测它的前驱。
+            // 后续准备会在同一事务绑定前驱并裁决唯一后继。
+            // 标记只占控制记录而不预留额度；同一发送最多登记有限身份，防止恶意停止无限增长。
+            let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM file_attempt_marker WHERE send_id=? AND stopped=1")
+                .bind(&send).fetch_one(&mut *tx).await?;
+            let recent: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM file_attempt_marker WHERE stopped=1 AND created_at >= unixepoch() - 3600")
+                .fetch_one(&mut *tx).await?;
+            // 未登记的停止身份会永久保留；除速率外还限制全库纯标记，
+            // 但已登记发送的停止不能因别人填满标记额度而失去终止能力。
+            let markers: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM file_attempt_marker WHERE stopped=1 AND send_id NOT IN (SELECT send_id FROM file_send)")
+                .fetch_one(&mut *tx).await?;
+            if recorded.is_none() && (count >= 64 || recent >= 64 || (state.is_none() && markers >= 4096)) { return Ok("busy") }
+            sqlx::query("INSERT INTO file_attempt_marker (attempt_id,send_id) VALUES (?,?)")
+                .bind(&attempt).bind(&send).execute(&mut *tx).await?;
+        }
+        if owner.is_some() {
+            sqlx::query("UPDATE file_attempt_marker SET stopped=1 WHERE attempt_id=?")
+                .bind(&attempt).execute(&mut *tx).await?;
+        }
+        if let Some((state, current)) = state {
+            if current == attempt {
+                if state == "prepared" || state == "writing" {
+                    sqlx::query("UPDATE file_send SET state='cleaning' WHERE send_id=? AND state IN ('prepared','writing')")
+                        .bind(&send).execute(&mut *tx).await?;
+                    sqlx::query("UPDATE file_attempt SET state='cleaning' WHERE attempt_id=? AND state IN ('prepared','writing')")
+                        .bind(&attempt).execute(&mut *tx).await?;
+                } else if state == "failed" {
+                    sqlx::query("UPDATE file_send SET state='stopped' WHERE send_id=? AND state='failed'")
+                        .bind(&send).execute(&mut *tx).await?;
+                    sqlx::query("UPDATE file_attempt SET state='stopped' WHERE attempt_id=? AND state='failed'")
+                        .bind(&attempt).execute(&mut *tx).await?;
+                }
+            } else {
+                sqlx::query("UPDATE file_attempt SET state='stopped' WHERE attempt_id=? AND send_id=? AND state='failed'")
+                    .bind(&attempt).bind(&send).execute(&mut *tx).await?;
+            }
+        }
+        tx.commit().await?;
+        Ok("stopped")
+    }.await;
+    match result {
+        Ok("success") => crate::messages::committed(&mut db, &send).await,
+        Ok("stopped") => {
+            // 清理只由后台协调，写入者仍可能持有文件句柄；响应仅承诺禁止提交。
+            json(
+                StatusCode::OK,
+                serde_json::json!({"state":"stopped","send_id":send,"attempt_id":attempt}),
+            )
+        }
+        Ok("busy") => error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "transfer_busy",
+            "停止请求过多",
+        ),
+        Ok("conflict") => error(StatusCode::CONFLICT, "attempt_conflict", "传输尝试不匹配"),
+        _ => unavailable(),
     }
 }
 
@@ -929,6 +1176,7 @@ pub(crate) async fn content(
             let mut tx = db.begin().await?;
         let inserted = sqlx::query("INSERT INTO message (send_id,text,source_label,created_at,kind,file_id,file_name,file_size,file_mime) SELECT send_id,'',source_label,strftime('%Y-%m-%dT%H:%M:%SZ','now'),'FILE',file_id,name,size,mime FROM file_send WHERE send_id=? AND state='writing'")
             .bind(&send).execute(&mut *tx).await?;
+        // 停止与提交在同一写事务中争夺状态：停止先落库则 SELECT 不会产生消息。
         if inserted.rows_affected()!=1 { return Err("commit lost".into()); }
         sqlx::query("UPDATE file_send SET state='success' WHERE send_id=?").bind(&send).execute(&mut *tx).await?;
         sqlx::query("UPDATE file_attempt SET state='success' WHERE attempt_id=?").bind(&attempt).execute(&mut *tx).await?;
@@ -986,7 +1234,7 @@ pub(crate) async fn content(
                 Ok(tx) => tx,
                 Err(_) => return unavailable(),
             };
-            let changed = sqlx::query("UPDATE file_send SET state='cleaning' WHERE send_id=? AND attempt_id=? AND state='writing'")
+            let changed = sqlx::query("UPDATE file_send SET state='cleaning' WHERE send_id=? AND attempt_id=? AND state IN ('writing','cleaning')")
                 .bind(&send).bind(&attempt).execute(&mut *tx).await;
             if !matches!(changed, Ok(ref row) if row.rows_affected() == 1) {
                 return unavailable();
