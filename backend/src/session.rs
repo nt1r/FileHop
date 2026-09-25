@@ -140,6 +140,11 @@ fn router_inner(database: PathBuf, files: PathBuf, config: Config, recovered: bo
         .route("/api/session", get(current).post(login).delete(logout))
         .route("/api/sends/{send_id}", get(crate::messages::result))
         .route("/api/transfer-limits", get(crate::files::limits))
+        .route("/api/file-sends/{send_id}", get(crate::files::send_status))
+        .route(
+            "/api/file-sends/{send_id}/attempts",
+            axum::routing::post(crate::files::successor),
+        )
         .route(
             "/api/file-sends",
             axum::routing::post(crate::files::prepare),

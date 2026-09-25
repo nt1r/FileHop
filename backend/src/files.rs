@@ -587,6 +587,193 @@ pub(crate) async fn prepare(
     }
 }
 
+// 查询的是发送及当前尝试，不是“有没有成功消息”；未找到成功结果不能证明尚未开始写入。
+pub(crate) async fn send_status(
+    State(service): State<Arc<Service>>,
+    headers: HeaderMap,
+    Path(send): Path<String>,
+) -> Response {
+    let (mut db, _) = match authenticate(&service, &headers).await {
+        Ok(v) => v,
+        Err(e) => return *e,
+    };
+    let Some(send) = id(&send) else {
+        return error(StatusCode::NOT_FOUND, "send_not_found", "发送不存在");
+    };
+    let row: Option<(String, String)> =
+        match sqlx::query_as("SELECT state,attempt_id FROM file_send WHERE send_id=?")
+            .bind(&send)
+            .fetch_optional(&mut db)
+            .await
+        {
+            Ok(v) => v,
+            Err(_) => return unavailable(),
+        };
+    let Some((state, attempt)) = row else {
+        return error(StatusCode::NOT_FOUND, "send_not_found", "发送不存在");
+    };
+    if state == "success" {
+        let response = crate::messages::committed(&mut db, &send).await;
+        if response.status() != StatusCode::OK {
+            return response;
+        }
+        let bytes = match to_bytes(response.into_body(), 8192).await {
+            Ok(b) => b,
+            Err(_) => return unavailable(),
+        };
+        let message: serde_json::Value = match serde_json::from_slice(&bytes) {
+            Ok(v) => v,
+            Err(_) => return unavailable(),
+        };
+        return json(
+            StatusCode::OK,
+            serde_json::json!({"state":state,"send_id":send,"attempt_id":attempt,"message":message}),
+        );
+    }
+    json(
+        StatusCode::OK,
+        serde_json::json!({"state":state,"send_id":send,"attempt_id":attempt}),
+    )
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct NextAttempt {
+    attempt_id: String,
+    previous_attempt_id: String,
+}
+
+pub(crate) async fn successor(
+    State(service): State<Arc<Service>>,
+    headers: HeaderMap,
+    Path(send): Path<String>,
+    body: Body,
+) -> Response {
+    if !write_origin_allowed(&service, &headers) {
+        return error(StatusCode::FORBIDDEN, "origin_rejected", "请求来源不被允许");
+    }
+    let (mut db, _) = match authenticate(&service, &headers).await {
+        Ok(v) => v,
+        Err(e) => return *e,
+    };
+    // 与首次准备共用鉴权后的有界读取：未授权及慢请求不能无界消耗解析资源。
+    let _permit = match service.transfers.preparations.clone().try_acquire_owned() {
+        Ok(p) => p,
+        Err(_) => {
+            return error(
+                StatusCode::TOO_MANY_REQUESTS,
+                "transfer_busy",
+                "准备请求过多",
+            );
+        }
+    };
+    let bytes = match tokio::time::timeout(Duration::from_secs(15), to_bytes(body, 8192)).await {
+        Ok(Ok(v)) => v,
+        Ok(Err(_)) => return error(StatusCode::PAYLOAD_TOO_LARGE, "body_too_large", "请求过大"),
+        Err(_) => {
+            return error(
+                StatusCode::REQUEST_TIMEOUT,
+                "request_timeout",
+                "准备请求超时",
+            );
+        }
+    };
+    let next: NextAttempt = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(_) => return error(StatusCode::BAD_REQUEST, "invalid_json", "无效尝试元数据"),
+    };
+    let (Some(send), Some(attempt), Some(previous)) = (
+        id(&send),
+        id(&next.attempt_id),
+        id(&next.previous_attempt_id),
+    ) else {
+        return error(StatusCode::UNPROCESSABLE_ENTITY, "invalid_id", "无效标识");
+    };
+    if attempt == previous {
+        return error(StatusCode::CONFLICT, "attempt_conflict", "传输尝试不匹配");
+    }
+    if !service
+        .transfers
+        .ready
+        .load(std::sync::atomic::Ordering::Acquire)
+    {
+        return unavailable();
+    }
+    let _guard = match service.transfers.gate.try_lock() {
+        Ok(g) => g,
+        Err(_) => {
+            return error(
+                StatusCode::TOO_MANY_REQUESTS,
+                "transfer_busy",
+                "准备请求过多",
+            );
+        }
+    };
+    if let Err(e) = reconcile(&service, &mut db).await {
+        return *e;
+    }
+    let result: Result<String, sqlx::Error> = async {
+        let mut tx = db.begin().await?;
+        // 写锁让前驱检查、额度核算、后继创建成为同一个裁决；旧请求不能与新尝试争用实体。
+        sqlx::query("UPDATE instance SET storage_id=storage_id WHERE singleton=1").execute(&mut *tx).await?;
+        let row: Option<(String, String, i64)> = sqlx::query_as("SELECT state,attempt_id,size FROM file_send WHERE send_id=?")
+            .bind(&send).fetch_optional(&mut *tx).await?;
+        let Some((state, current, size)) = row else { return Ok("not_found".into()) };
+        if state == "success" { return Ok(state) }
+        let replay: Option<String> = sqlx::query_scalar("SELECT state FROM file_attempt WHERE attempt_id=? AND send_id=?")
+            .bind(&attempt).bind(&send).fetch_optional(&mut *tx).await?;
+        if let Some(replay) = replay { return Ok(replay) }
+        if current != previous { return Ok("conflict".into()) }
+        if state != "failed" { return Ok("busy".into()) }
+        if size > service.config.transfer.max_file_size { return Ok("file_too_large".into()) }
+        let used: i64 = sqlx::query_scalar("SELECT COALESCE(SUM(reserved),0) FROM file_send")
+            .fetch_one(&mut *tx).await?;
+        if size > service.config.transfer.quota || used > service.config.transfer.quota - size { return Ok("quota_exceeded".into()) }
+        let available = fs2::available_space(&service.files).map_err(sqlx::Error::Io)?;
+        if available < (size as u64).saturating_add(service.config.transfer.disk_reserve) { return Ok("disk_full".into()) }
+        let taken: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM file_attempt WHERE attempt_id=?").bind(&attempt).fetch_one(&mut *tx).await?;
+        if taken != 0 { return Ok("conflict".into()) }
+        // 每次重传使用新实体；旧实体即使迟到也只属于旧尝试，不会被复用。
+        let file = Uuid::new_v4().to_string();
+        sqlx::query("UPDATE file_send SET attempt_id=?,file_id=?,state='prepared',reserved=size,prepared_at=strftime('%s','now') WHERE send_id=? AND attempt_id=? AND state='failed'")
+            .bind(&attempt).bind(&file).bind(&send).bind(&previous).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO file_attempt (attempt_id,send_id,state) VALUES (?,?,'prepared')")
+            .bind(&attempt).bind(&send).execute(&mut *tx).await?;
+        tx.commit().await?;
+        Ok("prepared".into())
+    }.await;
+    match result {
+        Ok(state) if state == "success" => crate::messages::committed(&mut db, &send).await,
+        Ok(state) if state == "not_found" => {
+            error(StatusCode::NOT_FOUND, "send_not_found", "发送不存在")
+        }
+        Ok(state) if state == "conflict" => {
+            error(StatusCode::CONFLICT, "attempt_conflict", "传输尝试不匹配")
+        }
+        Ok(state) if state == "busy" => {
+            error(StatusCode::CONFLICT, "attempt_busy", "尝试仍在进行或清理中")
+        }
+        Ok(state) if state == "file_too_large" => error(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "file_too_large",
+            "文件超过上限",
+        ),
+        Ok(state) if state == "quota_exceeded" => {
+            error(StatusCode::CONFLICT, "quota_exceeded", "文件空间不足")
+        }
+        Ok(state) if state == "disk_full" => error(
+            StatusCode::INSUFFICIENT_STORAGE,
+            "disk_full",
+            "磁盘空间不足",
+        ),
+        Ok(state) => json(
+            StatusCode::OK,
+            serde_json::json!({"state":state,"send_id":send,"attempt_id":attempt}),
+        ),
+        Err(_) => unavailable(),
+    }
+}
+
 pub(crate) async fn content(
     State(service): State<Arc<Service>>,
     headers: HeaderMap,
