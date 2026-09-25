@@ -70,6 +70,10 @@ body {
 .message pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 .message-notice { min-height: 1.7em; }
 
+.upload-panel { display: grid; gap: 0.8rem; }
+.file-picker { display: none; }
+.upload-task { display: grid; gap: 0.35rem; padding: 0.85rem; border: 1px solid color-mix(in srgb, var(--color-kumo-brand) 25%, transparent); border-radius: 0.75rem; }
+.upload-task progress { width: 100%; accent-color: var(--color-kumo-brand); }
 .composer { margin-top: 0.25rem; }
 .composer textarea { min-height: 9rem; resize: vertical; }
 .recovery { display: flex; flex-wrap: wrap; gap: 0.5rem; }
