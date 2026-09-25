@@ -65,11 +65,24 @@ export async function verifyFiles(page: Page) {
   expect(puts).toBe(1)
   await expect(page.getByRole('button', { name: '选择文件' })).toBeDisabled()
   await page.unroute('**/api/file-sends/*/attempts/*/content')
-  page.once('dialog', dialog => dialog.accept())
+  await page.getByRole('button', { name: '查询文件结果' }).last().click()
+  await expect(page.getByText('上传成功').last()).toBeVisible()
+  expect(puts).toBe(1)
   await page.reload()
   await expect(page.getByText('unknown-upload.txt')).toHaveCount(1) // 历史可见，但任务不恢复。
   await expect(page.getByText('结果未确认：', { exact: false })).toHaveCount(0)
   expect(puts).toBe(1)
+
+  // 第一次传输缺字节而明确失败，清理完成后用原文件引用从头重试。
+  await page.route('**/api/file-sends/*/attempts/*/content', async route => {
+    const response = await route.fetch({ postData: 'x' })
+    await route.fulfill({ response })
+  }, { times: 1 })
+  await picker.setInputFiles({ name: 'retry-file.txt', mimeType: 'text/plain', buffer: Buffer.from('retry') })
+  await expect(page.getByText('上传失败：', { exact: false })).toBeVisible()
+  await page.getByRole('button', { name: '同次重试文件' }).last().click()
+  await expect(page.getByRole('article').filter({ hasText: 'retry-file.txt' })).toHaveCount(1)
+  await expect(page.getByText('上传成功').last()).toBeVisible()
 
   // 退出时即使上传成功的旧回调迟到，也不能重新显示已清空的本页任务。
   let release!: () => void

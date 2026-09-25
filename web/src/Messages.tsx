@@ -103,6 +103,10 @@ export default function Messages({ exchange, files }: { exchange: ReturnType<typ
         <Text>{task.name} · {task.size.toLocaleString('zh-CN')} 字节</Text>
         <progress max={100} value={task.progress} aria-label={`${task.name} 上传进度`} />
         <Text role="status" variant={task.status === '上传成功' ? 'success' : task.pending ? 'secondary' : 'error'} size="sm">{task.status}</Text>
+        {!task.pending && task.status !== '上传成功' && <div className="recovery">
+          <Button variant="secondary" onClick={() => void files.query(task.sendId)}>查询文件结果</Button>
+          <Button variant="secondary" onClick={() => void files.retry(task.sendId)}>同次重试文件</Button>
+        </div>}
       </div>)}
     </LayerCard>
 
