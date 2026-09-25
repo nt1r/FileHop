@@ -8,4 +8,6 @@ export default defineConfig({
   retries: 0,
   reporter: 'list',
   use: { baseURL: process.env.TEST_BASE_URL, trace: 'retain-on-failure' },
+  projects: [{ name: 'browser', use: { browserName: 'chromium',
+    ...(process.env.FILEHOP_TEST_CHROME === '1' ? { channel: 'chrome' as const } : {}) } }],
 })
