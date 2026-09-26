@@ -18,6 +18,16 @@ const upstream = http.createServer((req, res) => {
     req.on('end', () => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ bytes })) })
     return
   }
+  if (req.url === '/api/files/probe') {
+    res.setHeader('Content-Type', 'application/octet-stream')
+    res.setHeader('Content-Disposition', 'attachment; filename="probe.bin"')
+    res.write(Buffer.alloc(65536, 0x5a))
+    // 持续有进展的附件响应也必须跨过控制请求期限，不能只检查上传方向。
+    const progress = setInterval(() => res.write(Buffer.alloc(65536, 0x5a)), 1000)
+    const finish = setTimeout(() => res.end(), 16000)
+    res.on('close', () => { clearInterval(progress); clearTimeout(finish) })
+    return
+  }
   res.setHeader('Content-Type', 'application/json')
   res.end(JSON.stringify(observed(req)))
 })
@@ -90,10 +100,24 @@ https://localhost:${port} {
       let body = ''; res.on('data', b => { body += b }); res.on('end', () => resolve({ status: res.statusCode, body }))
     })
     req.on('error', reject)
+    req.setTimeout(5000, () => req.destroy(new Error('upload stalled')))
     req.write(Buffer.alloc(65536))
-    setTimeout(() => { req.end(Buffer.alloc(65536)) }, 16000)
+    const progress = setInterval(() => req.write(Buffer.alloc(65536)), 1000)
+    const finish = setTimeout(() => req.end(), 16000)
+    req.on('close', () => { clearInterval(progress); clearTimeout(finish) })
   })
-  assert.deepEqual(await streamed, { status: 200, body: JSON.stringify({ bytes: 131072 }) })
+  const downloadStarted = Date.now()
+  const downloaded = request('/api/files/probe', { authorization: auth }).then(attachment => {
+    assert.ok(Date.now() - downloadStarted >= 15000)
+    return attachment
+  })
+  const [uploaded, attachment] = await Promise.all([streamed, downloaded])
+  assert.equal(uploaded.status, 200)
+  assert.ok(JSON.parse(uploaded.body).bytes >= 2 * 65536)
+  assert.equal(attachment.status, 200)
+  assert.match(attachment.headers['content-disposition'], /^attachment/)
+  assert.ok(attachment.body.length >= 2 * 65536)
+  assert.ok([...attachment.body].every(byte => byte === 'Z'))
   for (const path of ['/api/file-sends/probe/attempts/probe/content', '/api/files/probe']) {
     const res = await request(path)
     assert.equal(res.status, 401)
@@ -103,7 +127,7 @@ https://localhost:${port} {
   assert.equal((await request('/', upgrade)).status, 401)
   assert.equal((await request('/', { ...upgrade, authorization: 'Basic d3Jvbmc6d3Jvbmc=' })).status, 401)
   assert.equal((await request('/', { ...upgrade, authorization: auth })).status, 101)
-  console.log('HTTPS page/API/HMR/upgrade gate, credential removal, source override and internal route protection passed.')
+  console.log('HTTPS page/API/HMR/upgrade gate, credential removal, source override, internal route protection and progressing transfers over 15 seconds passed.')
 } finally {
   if (child && child.exitCode === null) {
     child.kill('SIGTERM')
