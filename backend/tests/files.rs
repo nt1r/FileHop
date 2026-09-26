@@ -236,6 +236,87 @@ async fn active_read_rejects_delete_and_cancellation_releases_it_without_queued_
 }
 
 #[tokio::test]
+async fn read_failure_releases_handle_and_allows_explicit_deletion() {
+    let f = Fixture::new().await;
+    let send = uuid::Uuid::new_v4();
+    let attempt = uuid::Uuid::new_v4();
+    let input = json!({"send_id":send.to_string(),"attempt_id":attempt.to_string(),"name":"shortened","size":1048576,"mime":"","source_label":"Web"});
+    assert_eq!(
+        f.json("POST", "/api/file-sends", input).await.0,
+        StatusCode::OK
+    );
+    let response = f
+        .request(
+            "PUT",
+            &format!("/api/file-sends/{send}/attempts/{attempt}/content"),
+            Body::from(vec![42; 1048576]),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let message: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 4096).await.unwrap()).unwrap();
+    let file = message["file_id"].as_str().unwrap();
+    let path = format!("/api/files/{file}");
+    let download = f.request("GET", &path, Body::empty()).await;
+    assert_eq!(download.status(), StatusCode::OK);
+    assert_eq!(
+        f.json("DELETE", &path, Value::Null).await.1["code"],
+        "FILE_IN_USE"
+    );
+    // 已打开句柄后才截短本用例的实体；文件大于有界缓冲，必然遇到提前 EOF，
+    // 不能用打开前缺失或丢弃响应体冒充读取失败。原始成功历史和占用仍应保留。
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(f._root.path().join("files").join(file))
+        .unwrap()
+        .set_len(0)
+        .unwrap();
+    assert!(
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            to_bytes(download.into_body(), 1048576)
+        )
+        .await
+        .unwrap()
+        .is_err()
+    );
+    // 接收错误与任务收尾可并发；观察真实句柄关闭后只主动删除一次，避免隐式排队。
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            if std::fs::read_dir("/proc/self/fd")
+                .unwrap()
+                .filter_map(Result::ok)
+                .filter_map(|entry| std::fs::read_link(entry.path()).ok())
+                .all(|path| path != f._root.path().join("files").join(file))
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        f.json("GET", "/api/storage", Value::Null).await.1["saved_bytes"],
+        "1048576"
+    );
+    assert_eq!(
+        f.json("GET", &format!("/api/file-sends/{send}"), Value::Null)
+            .await
+            .1["message"]["id"],
+        message["id"]
+    );
+    assert_eq!(
+        f.json("DELETE", &path, Value::Null).await.0,
+        StatusCode::ACCEPTED
+    );
+    assert_eq!(
+        f.request("GET", &path, Body::empty()).await.status(),
+        StatusCode::GONE
+    );
+}
+
+#[tokio::test]
 async fn delete_requires_cookie_origin_and_a_managed_identifier() {
     let f = Fixture::new().await;
     let path = format!("/api/files/{}", uuid::Uuid::new_v4());
