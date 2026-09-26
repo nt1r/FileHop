@@ -107,6 +107,21 @@ export async function verifyFiles(page: Page) {
   const picker = page.locator('input[type="file"]')
   await verifyFileQueue(page)
   await verifyQueueRecovery(page)
+  // 上传整体期限必须来自认证能力快照，而不是页面固定 31 分钟。
+  await page.route('**/api/transfer-limits', async route => {
+    const response = await route.fetch()
+    const limits = await response.json()
+    await route.fulfill({ response, json: { ...limits, upload_total_timeout_seconds: 2400 } })
+  })
+  await page.evaluate(() => {
+    const original = XMLHttpRequest.prototype.send
+    XMLHttpRequest.prototype.send = function (body) {
+      if (body instanceof File) {
+        document.documentElement.dataset.uploadTimeout = String(this.timeout)
+      }
+      return original.call(this, body)
+    }
+  })
   await expect(page.getByText('单文件上限 1,024 字节', { exact: false })).toBeVisible()
   await expect(page.getByRole('button', { name: '选择文件' })).toBeEnabled()
   await picker.setInputFiles({ name: 'oversized.txt', mimeType: 'text/plain', buffer: Buffer.alloc(1025) })
@@ -129,6 +144,8 @@ export async function verifyFiles(page: Page) {
   })
   await picker.setInputFiles({ name: 'single-upload.txt', mimeType: 'text/plain', buffer: Buffer.from('single file') })
   await started
+  await expect(page.locator('html')).toHaveAttribute('data-upload-timeout', '2460000')
+  await page.unroute('**/api/transfer-limits')
   await expect(page.getByText('上传成功')).toHaveCount(0)
   await page.getByLabel('正文', { exact: true }).fill('text independent of file')
   await page.getByRole('button', { name: '发送', exact: true }).click()
@@ -154,6 +171,16 @@ export async function verifyFiles(page: Page) {
   await expect(page.getByText('限制未知或离线', { exact: false })).toBeVisible()
   await expect(page.getByRole('button', { name: '选择文件' })).toBeDisabled()
   await expect(page.getByText('offline.txt')).toHaveCount(0)
+  await page.unroute('**/api/transfer-limits')
+  await page.route('**/api/transfer-limits', async route => {
+    const response = await route.fetch()
+    const { upload_total_timeout_seconds: omitted, ...limits } = await response.json()
+    void omitted
+    await route.fulfill({ response, json: limits })
+  })
+  await page.getByRole('button', { name: '重查文件限制' }).click()
+  await expect(page.getByText('限制未知或离线', { exact: false })).toBeVisible()
+  await expect(page.getByRole('button', { name: '选择文件' })).toBeDisabled()
   await page.unroute('**/api/transfer-limits')
   await page.getByRole('button', { name: '重查文件限制' }).click()
   await expect(page.getByRole('button', { name: '选择文件' })).toBeEnabled()
