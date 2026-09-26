@@ -19,6 +19,9 @@ impl Instance {
         Self::with_limits(3, 120).await
     }
     async fn with_limits(quota: i64, idle_seconds: u64) -> Self {
+        Self::with_prepare_timeout(quota, idle_seconds, 120).await
+    }
+    async fn with_prepare_timeout(quota: i64, idle_seconds: u64, prepare_seconds: u64) -> Self {
         let root = tempfile::tempdir().unwrap();
         let database = root.path().join("database");
         let files = root.path().join("files");
@@ -31,6 +34,7 @@ impl Instance {
         config.transfer.quota = quota;
         config.transfer.max_file_size = quota;
         config.transfer.idle_timeout = std::time::Duration::from_secs(idle_seconds);
+        config.transfer.prepare_timeout = std::time::Duration::from_secs(prepare_seconds);
         let app = backend::app_with_config(database.clone(), files.clone(), config);
         let response = app
             .clone()
@@ -85,6 +89,116 @@ impl Instance {
         (status, body)
     }
 }
+// 只轮询只读状态接口；不能用准备/后继请求顺带触发协调，冒充后台清理证据。
+async fn wait_for_state(i: &Instance, send: &str, expected: &str) {
+    tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        loop {
+            let (status, body) = i
+                .request("GET", &format!("/api/file-sends/{send}"), Body::empty())
+                .await;
+            assert_eq!(status, StatusCode::OK);
+            if body["state"] == expected {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("background maintenance did not reach the expected state");
+}
+
+#[tokio::test]
+async fn unused_preparation_expires_without_another_write_request() {
+    let i = Instance::with_prepare_timeout(3, 120, 1).await;
+    let send = uuid::Uuid::new_v4().to_string();
+    let input = json!({"send_id":send,"attempt_id":uuid::Uuid::new_v4().to_string(),
+        "name":"unused","size":3,"mime":"","source_label":"Web"});
+    assert_eq!(
+        i.request("POST", "/api/file-sends", Body::from(input.to_string()))
+            .await
+            .0,
+        StatusCode::OK
+    );
+    wait_for_state(&i, &send, "failed").await;
+    assert_eq!(
+        i.request("GET", &format!("/api/sends/{send}"), Body::empty())
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    // 先观察后台终结，再申请完整额度；新请求不是清理的触发器。
+    let next = json!({"send_id":uuid::Uuid::new_v4().to_string(),"attempt_id":uuid::Uuid::new_v4().to_string(),
+        "name":"next","size":3,"mime":"","source_label":"Web"});
+    assert_eq!(
+        i.request("POST", "/api/file-sends", Body::from(next.to_string()))
+            .await
+            .0,
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn background_cleanup_retries_after_failure_without_another_write_request() {
+    let i = Instance::new().await;
+    let send = uuid::Uuid::new_v4().to_string();
+    let attempt = uuid::Uuid::new_v4().to_string();
+    let input = json!({"send_id":send,"attempt_id":attempt,
+        "name":"blocked","size":3,"mime":"","source_label":"Web"});
+    assert_eq!(
+        i.request("POST", "/api/file-sends", Body::from(input.to_string()))
+            .await
+            .0,
+        StatusCode::OK
+    );
+    // 仅用存储边界注入不可删除实体；状态及最终额度从 HTTP 验证。
+    let mut db = sqlx::SqliteConnection::connect_with(
+        &sqlx::sqlite::SqliteConnectOptions::new().filename(i.database.join("transfer.db")),
+    )
+    .await
+    .unwrap();
+    let file_id: String = sqlx::query_scalar("SELECT file_id FROM file_send WHERE send_id=?")
+        .bind(&send)
+        .fetch_one(&mut db)
+        .await
+        .unwrap();
+    drop(db);
+    let abnormal = i.files.join(format!("{file_id}.partial"));
+    std::fs::create_dir(&abnormal).unwrap();
+    std::fs::write(abnormal.join("blocker"), b"synthetic").unwrap();
+    // 等到写入请求明确报告清理失败再解除故障，避免只看 cleaning 就与首次删除竞争。
+    let (status, body) = i
+        .request(
+            "PUT",
+            &format!("/api/file-sends/{send}/attempts/{attempt}/content"),
+            Body::from("abc"),
+        )
+        .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(body["code"], "cleanup_pending");
+    wait_for_state(&i, &send, "cleaning").await;
+    assert!(abnormal.join("blocker").exists());
+    // 解除故障后不发任何写请求，等待后台重试。
+    std::fs::remove_file(abnormal.join("blocker")).unwrap();
+    std::fs::remove_dir(&abnormal).unwrap();
+    std::fs::write(&abnormal, b"abc").unwrap();
+    wait_for_state(&i, &send, "failed").await;
+    assert!(!abnormal.exists());
+    assert_eq!(
+        i.request("GET", &format!("/api/sends/{send}"), Body::empty())
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    let next = json!({"send_id":uuid::Uuid::new_v4().to_string(),"attempt_id":uuid::Uuid::new_v4().to_string(),
+        "name":"next","size":3,"mime":"","source_label":"Web"});
+    assert_eq!(
+        i.request("POST", "/api/file-sends", Body::from(next.to_string()))
+            .await
+            .0,
+        StatusCode::OK
+    );
+}
+
 #[tokio::test]
 async fn broken_cleanup_does_not_starve_items_beyond_first_page() {
     let i = Instance::new().await;
