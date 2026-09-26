@@ -22,7 +22,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 chmod 755 "$root"
 mkdir "$root/database" "$root/files"
-printf 'services:\n  backend:\n    image: filehop-issue6-backend\n    user: "%s:%s"\n    network_mode: none\n    volumes:\n      - "%s/database:/data/database"\n      - "%s/files:/data/files"\n' "$(id -u)" "$(id -g)" "$root" "$root" >"$root/compose.yml"
+printf 'services:\n  backend:\n    image: "${FILEHOP_BACKEND_IMAGE:-filehop-issue6-backend}"\n    user: "%s:%s"\n    network_mode: none\n    volumes:\n      - "%s/database:/data/database"\n      - "%s/files:/data/files"\n' "$(id -u)" "$(id -g)" "$root" "$root" >"$root/compose.yml"
 "${compose[@]}" up -d
 "${compose[@]}" exec -T backend filehop --help
 "${compose[@]}" up -d --force-recreate
