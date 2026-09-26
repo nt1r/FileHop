@@ -9,6 +9,11 @@ route {
 		reverse_proxy {$FILEHOP_BACKEND_UPSTREAM} {
 			# 覆盖伪造来源；后端还须核对 TCP 对端是配置的精确代理地址。
 			header_up X-FileHop-Client-IP {remote_host}
+			transport http {
+				dial_timeout {$FILEHOP_PROXY_CONNECT_TIMEOUT:5s}
+				# 从请求体发完后计时，不是整个上传/下载的期限。
+				response_header_timeout {$FILEHOP_PROXY_RESPONSE_HEADER_TIMEOUT:60s}
+			}
 		}
 	}
 	handle /internal/* {

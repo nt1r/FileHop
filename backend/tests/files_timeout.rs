@@ -50,6 +50,22 @@ async fn progressing_upload_may_take_longer_than_json_timeout() {
         .split(';')
         .next()
         .unwrap();
+    let limits = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/transfer-limits")
+                .header("cookie", cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(limits.status(), StatusCode::OK);
+    assert_eq!(limits.headers()["cache-control"], "no-store");
+    let limits: serde_json::Value =
+        serde_json::from_slice(&to_bytes(limits.into_body(), 8192).await.unwrap()).unwrap();
+    assert_eq!(limits["upload_total_timeout_seconds"], 25);
     let send = uuid::Uuid::new_v4();
     let attempt = uuid::Uuid::new_v4();
     let request = |method: &str, path: String, body: Body| {

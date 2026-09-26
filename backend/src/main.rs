@@ -115,6 +115,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 || prepare_timeout_secs == 0
                 || upload_idle_secs == 0
                 || upload_total_secs == 0
+                || upload_total_secs > 4_294_907
                 || download_idle_secs == 0
             {
                 return Err("invalid transfer resource configuration".into());

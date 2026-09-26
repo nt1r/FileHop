@@ -362,7 +362,10 @@ pub(crate) async fn limits(State(service): State<Arc<Service>>, headers: HeaderM
     }
     json(
         StatusCode::OK,
-        serde_json::json!({"max_file_size_bytes":service.config.transfer.max_file_size}),
+        serde_json::json!({
+            "max_file_size_bytes":service.config.transfer.max_file_size,
+            "upload_total_timeout_seconds":service.config.transfer.total_timeout.as_secs(),
+        }),
     )
 }
 pub(crate) async fn prepare(
