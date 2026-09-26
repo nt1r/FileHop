@@ -654,6 +654,76 @@ async fn expired_preparation_cannot_start_writing_even_before_cleanup() {
     );
 }
 #[tokio::test]
+async fn authenticated_upload_finishes_after_expiry_but_new_requests_require_login() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicI64, Ordering},
+    };
+    let original = Fixture::new().await;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let time = Arc::new(AtomicI64::new(now));
+    let mut config = backend::session::Config::default();
+    let clock = time.clone();
+    config.now = Arc::new(move || clock.load(Ordering::SeqCst));
+    let app = backend::app_with_config(
+        original._root.path().join("database"),
+        original._root.path().join("files"),
+        config,
+    );
+    let f = Fixture::with_app(original._root, app).await;
+    let send = uuid::Uuid::new_v4().to_string();
+    let attempt = uuid::Uuid::new_v4().to_string();
+    let input = json!({"send_id":send,"attempt_id":attempt,"name":"expiry.txt","size":3,"mime":"","source_label":"Web"});
+    assert_eq!(
+        f.json("POST", "/api/file-sends", input).await.0,
+        StatusCode::OK
+    );
+    // 首次读取请求体说明鉴权与准入已经完成；此时推进认证时钟，不等待真实十二小时。
+    let body = Body::from_stream(futures_util::stream::once(async move {
+        time.fetch_add(43_200, Ordering::SeqCst);
+        Ok::<_, std::io::Error>(axum::body::Bytes::from_static(b"abc"))
+    }));
+    let response = f
+        .request(
+            "PUT",
+            &format!("/api/file-sends/{send}/attempts/{attempt}/content"),
+            body,
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        f.json("GET", &format!("/api/file-sends/{send}"), Value::Null)
+            .await
+            .0,
+        StatusCode::UNAUTHORIZED
+    );
+    let f = Fixture::with_app(f._root, f.app).await;
+    let (status, result) = f
+        .json("GET", &format!("/api/file-sends/{send}"), Value::Null)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(result["state"], "success");
+    let response = f
+        .request(
+            "GET",
+            &format!(
+                "/api/files/{}",
+                result["message"]["file_id"].as_str().unwrap()
+            ),
+            Body::empty(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        to_bytes(response.into_body(), 1024).await.unwrap().as_ref(),
+        b"abc"
+    );
+}
+
+#[tokio::test]
 async fn recovery_ends_uncommitted_attempt_without_creating_a_message() {
     let f = Fixture::new().await;
     let send = uuid::Uuid::new_v4().to_string();
