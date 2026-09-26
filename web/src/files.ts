@@ -9,7 +9,7 @@ const unknown = '结果未确认：请先检查消息历史；本页不会自动
 const pendingCleanup = '结果未确认：清理未完成，空间尚未释放；请先检查消息历史。'
 const uncertain = (task: Task) => task.status.startsWith('结果未确认：')
 
-export function useFiles(active: boolean, onExpired: () => void, onMessage: (message: Message) => void) {
+export function useFiles(active: boolean, onExpired: () => void, onMessage: (message: Message) => void, refreshFileStates: () => Promise<void>) {
   const [tasks, setTasks] = useState<Task[]>([])
   const [limits, setLimits] = useState<Limits>('loading')
   const tasksRef = useRef(tasks)
@@ -416,6 +416,8 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
       if (version !== epoch.current || !live.current) return ''
       if (!response.ok || response.headers.has('x-filehop-access-layer')) {
         if (response.status === 401 && !response.headers.has('x-filehop-access-layer')) expired.current()
+        else await refreshFileStates()
+        if (version !== epoch.current || !live.current) return ''
         return '无法开始下载：文件不可用或登录/访问层异常，请检查后重试。'
       }
       const link = document.createElement('a')

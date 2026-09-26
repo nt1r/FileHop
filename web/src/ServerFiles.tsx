@@ -2,13 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { Button } from '@cloudflare/kumo/components/button'
 import { LayerCard } from '@cloudflare/kumo/components/layer-card'
 import { Text } from '@cloudflare/kumo/components/text'
-import { fileStateLabels, isMessage, type Message } from './messages'
+import { fileStateLabels, isMessage, type Message, type useMessages } from './messages'
 import type { useFiles } from './files'
 import StorageUsage from './StorageUsage'
 
 type FileMessage = Extract<Message, { kind: 'FILE' }>
 
-export default function ServerFiles({ files, onExpired }: { files: ReturnType<typeof useFiles>; onExpired: () => void }) {
+export default function ServerFiles({ files, exchange, onExpired }: { files: ReturnType<typeof useFiles>; exchange: ReturnType<typeof useMessages>; onExpired: () => void }) {
   const [usageRefresh, setUsageRefresh] = useState(0)
   const [items, setItems] = useState<FileMessage[]>([])
   const [before, setBefore] = useState<string | null>(null)
@@ -42,7 +42,10 @@ export default function ServerFiles({ files, onExpired }: { files: ReturnType<ty
       const page = value.files as FileMessage[]
       if (value.before !== (page.at(-1)?.id ?? null) || (value.has_more && !page.length) ||
         page.some((m, i) => (older && before !== null && BigInt(m.id) >= BigInt(before)) || (i > 0 && BigInt(m.id) >= BigInt(page[i - 1].id)))) throw new Error()
+      exchange.rememberFiles(page)
       setItems(current => older ? [...current, ...page] : page)
+      if (!older) await exchange.refreshFileStates()
+      if (!alive.current || version !== generation.current) return
       setBefore(value.before)
       setHasMore(value.has_more)
     } catch {
@@ -76,9 +79,10 @@ export default function ServerFiles({ files, onExpired }: { files: ReturnType<ty
       <StorageUsage refresh={usageRefresh} onExpired={onExpired} />
       <Text variant="secondary" size="sm">当前提供列表、下载和用量；删除尚未开放。</Text>
       {notice && <Text role="status" variant="error">{notice}</Text>}
+      {exchange.fileStatusNotice && <Text role="status" variant="error">{exchange.fileStatusNotice}</Text>}
       {busy && <Text role="status">正在读取文件列表…</Text>}
       {!busy && !notice && items.length === 0 && <Text variant="secondary">暂无服务器文件。</Text>}
-      {items.map(file => <LayerCard key={file.file_id} className="message" render={<article />}>
+      {items.map(exchange.projectFile).filter(file => file.file_state !== 'deleted').map(file => <LayerCard key={file.file_id} className="message" render={<article />}>
         <Text variant="heading" as="h3">{file.file_name}</Text>
         <Text>{file.file_size.toLocaleString('zh-CN')} 字节 · {file.source_label}</Text>
         <Text as="time" {...{ dateTime: file.created_at }}>上传时间：{file.created_at}</Text>

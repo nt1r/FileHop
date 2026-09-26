@@ -1,4 +1,6 @@
 import { expect, type Page } from '@playwright/test'
+import { unlinkSync } from 'node:fs'
+import { join } from 'node:path'
 
 export async function verifyServerFiles(page: Page) {
   const names = ['navigation-a.txt', 'navigation-b.txt', 'navigation-c.txt', 'navigation-wait.txt']
@@ -36,6 +38,31 @@ export async function verifyServerFiles(page: Page) {
   const [download] = await Promise.all([page.waitForEvent('download'), row.getByRole('link', { name: '下载附件' }).click()])
   expect(download.suggestedFilename()).toBe(names[0])
   expect(await download.failure()).toBeNull()
+  // 下载打开才发现实体丢失；状态查询必须把两个视图一起校正，且保留草稿和队列。
+  const fileId = (await row.getByRole('link', { name: '下载附件' }).getAttribute('href'))!.split('/').at(-1)!
+  // 保留真实旧列表响应；较新状态已被确认后才放行，不能恢复可下载。
+  let releaseOldList!: () => void
+  let oldListArrived!: () => void
+  const heldOldList = new Promise<void>(resolve => { releaseOldList = resolve })
+  const gotOldList = new Promise<void>(resolve => { oldListArrived = resolve })
+  await page.route('**/api/files', async route => {
+    const response = await route.fetch()
+    oldListArrived()
+    await heldOldList
+    await route.fulfill({ response })
+  }, { times: 1 })
+  await listing.getByRole('button', { name: '刷新文件列表' }).click()
+  await gotOldList
+  unlinkSync(join(process.env.TEST_FILES!, fileId))
+  await row.getByRole('link', { name: '下载附件' }).click()
+  await expect(row).toContainText('存储异常')
+  await expect(row.getByRole('link', { name: '下载附件' })).toHaveCount(0)
+  const oldListResponse = page.waitForResponse('**/api/files')
+  releaseOldList()
+  await oldListResponse
+  await expect(listing.getByRole('button', { name: '刷新文件列表' })).toBeEnabled()
+  await expect(row).toContainText('存储异常')
+  await expect(row.getByRole('link', { name: '下载附件' })).toHaveCount(0)
   // 延迟真实旧快照，期间提交新文件并刷新；旧响应不能覆盖较新的容量。
   let releaseUsage!: () => void
   let receivedUsage!: (saved: string) => void
@@ -73,6 +100,7 @@ export async function verifyServerFiles(page: Page) {
   await page.getByRole('button', { name: '登录', exact: true }).click()
   await expect(usage).toContainText(expectedSaved)
   await page.getByRole('button', { name: '消息工作区' }).click()
+  await expect(page.getByRole('article').filter({ hasText: names[0] })).toContainText('存储异常')
   await expect(page.getByLabel('正文', { exact: true })).toHaveValue('navigation draft')
   for (const name of names) await expect(page.locator('.upload-task').filter({ hasText: name })).toContainText('上传成功')
   await page.getByLabel('正文', { exact: true }).fill('navigation unknown send')
@@ -93,6 +121,45 @@ export async function verifyServerFiles(page: Page) {
   await page.getByLabel('正文', { exact: true }).fill('')
   await page.unrouteAll({ behavior: 'wait' })
 
+  // 已加载的旧文件不一定出现在新增轮询里；手动刷新须单独校正而不丢消息顺序。
+  const visibility = async (state: 'hidden' | 'visible') => page.evaluate(state => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state })
+    document.dispatchEvent(new Event('visibilitychange'))
+  }, state)
+  await visibility('hidden')
+  let hiddenQueries = 0
+  await page.route('**/api/files/status-query', async route => { hiddenQueries++; await route.continue() })
+  await page.getByRole('button', { name: '读取最近消息' }).click()
+  await page.clock.runFor(30000)
+  expect(hiddenQueries).toBe(0)
+  await visibility('visible')
+  await expect.poll(() => hiddenQueries).toBeGreaterThan(0)
+  await page.unroute('**/api/files/status-query')
+  const otherRow = page.getByRole('article').filter({ hasText: names[1] })
+  const otherId = (await otherRow.getByRole('link', { name: '下载附件' }).getAttribute('href'))!.split('/').at(-1)!
+  const order = await page.locator('[data-message-id]').evaluateAll(nodes => nodes.map(n => n.getAttribute('data-message-id')))
+  unlinkSync(join(process.env.TEST_FILES!, otherId))
+  await page.request.get(`/api/files/${otherId}`)
+  await page.getByLabel('正文', { exact: true }).fill('status correction draft')
+  await page.getByRole('button', { name: '读取最近消息' }).click()
+  await expect(otherRow).toContainText('存储异常')
+  expect(await page.locator('[data-message-id]').evaluateAll(nodes => nodes.map(n => n.getAttribute('data-message-id')))).toEqual(order)
+  await expect(page.getByLabel('正文', { exact: true })).toHaveValue('status correction draft')
+  await page.getByLabel('正文', { exact: true }).fill('')
+
+  // 真实批量状态响应延迟到退出并重新登录后，不能恢复旧认证周期内容。
+  let releaseStatus!: () => void
+  let statusArrived!: () => void
+  const heldStatus = new Promise<void>(resolve => { releaseStatus = resolve })
+  const gotStatus = new Promise<void>(resolve => { statusArrived = resolve })
+  await page.route('**/api/files/status-query', async route => {
+    const response = await route.fetch()
+    statusArrived()
+    await heldStatus
+    await route.fulfill({ response })
+  }, { times: 1 })
+  await page.getByRole('button', { name: '读取最近消息' }).click()
+  await gotStatus
   // 真实读取响应延迟到退出并重新登录后，不能恢复旧认证周期的文件列表。
   let release!: () => void
   let arrived!: () => void
@@ -122,6 +189,7 @@ export async function verifyServerFiles(page: Page) {
   await expect(page.getByRole('region', { name: '消息流' })).toBeVisible()
   const response = Promise.all([page.waitForResponse('**/api/files'), page.waitForResponse('**/api/storage')])
   release()
+  releaseStatus()
   await response
   await expect(listing).toHaveCount(0)
   await page.unrouteAll({ behavior: 'wait' })

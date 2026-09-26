@@ -111,7 +111,8 @@
 
 - `GET /api/files/{file_id}` 继续保留 Spec 002 的附件下载职责，不改为元数据接口；路由需正确区分 status 等路径。
 - 文件列表默认 50 条，最大 100 条；按成功提交消息 ID 的排他游标查询，不使用会因删除而漂移的 offset。`GET /api/files` 接受 `limit`（1–100）和可选 `before`（正整数消息 ID），返回 `{ files, before, has_more }`；`files` 复用 FILE 消息字段，按数值消息 ID 降序，`before` 为本页最后一条的 ID，空页为 null。未知或非法查询参数返回 `400 invalid_query`，先认证再校验参数。
-- 批量状态查询建议每批最多 100 个标识，遵循 Spec 001 共享认证矩阵：Web Cookie POST 须检查 Origin，原生有效 Bearer 可无 Origin；删除等管理接口同样按认证路径校验，不以缺失 Origin 本身作为身份。
+- 单文件状态返回 `{ file_id, file_state, state_version }`，未知或非法标识返回 `404 file_not_found`。批量状态查询接受 JSON `{ file_ids }`，每批 1–100 个 UUID，请求体最多 8 KiB、读取期限 15 秒；非法或未知字段返回 `400 invalid_query`，重复标识去重。响应 `{ files, not_found }` 中 `files` 为同一数据库快照内的状态对象，`not_found` 为未知标识，不将未知标识解释为已删除。两类查询只读取已知状态，不探测实体。
+- 批量状态查询遵循 Spec 001 共享认证矩阵：Web Cookie POST 须检查 Origin，原生有效 Bearer 可无 Origin；删除等管理接口同样按认证路径校验，不以缺失 Origin 本身作为身份。
 - 认证分阶段交付：本切片实现并验收 Web Cookie 认证与 Origin 防护；原生 Bearer 及相关混合凭证场景随 Spec 005 的原生认证能力交付后补验，不要求提前实现原生凭证体系。
 - DELETE 默认异步接受返回 202；重复删除中返回当前状态，已删除返回已完成，未知标识返回 404；活动下载返回 409/FILE_IN_USE，不自动延迟执行。
 - DELETE 按文件当前状态处理重复请求，保证不重复清理或释放额度，但不提供删除操作结果的永久重放：之前因下载被拒绝的请求，在下载结束后重新调用可能成功。因此客户端不得自动重试结果未知的 DELETE；自动重试仅用于已接受删除的服务端实体清理。
