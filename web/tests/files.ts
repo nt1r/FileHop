@@ -1,7 +1,112 @@
 import { expect, type Page } from '@playwright/test'
 
+async function verifyFileQueue(page: Page) {
+  const picker = page.locator('input[type="file"]')
+  const task = (name: string) => page.locator('.upload-task').filter({ hasText: name })
+  const file = (name: string) => ({ name, mimeType: 'text/plain', buffer: Buffer.from(name) })
+  const releases = new Map<string, () => void>()
+  const prepared: string[] = []
+  await page.route('**/api/file-sends', async route => {
+    prepared.push(route.request().postDataJSON().name)
+    await route.continue()
+  })
+  await page.route('**/api/file-sends/*/attempts/*/content', async route => {
+    const name = route.request().postData()!
+    await new Promise<void>(resolve => { releases.set(name, resolve) })
+    // 一个文件明确失败不应阻止后面的等待项；其余请求仍使用真实后端提交。
+    const response = await route.fetch(name === 'queue-b.txt' ? { postData: 'x' } : {})
+    await route.fulfill({ response })
+  })
+  await expect(page.getByRole('button', { name: '选择文件' })).toBeEnabled()
+  await picker.setInputFiles(['queue-a.txt', 'queue-b.txt', 'queue-c.txt', 'queue-remove.txt'].map(file))
+  await expect.poll(() => releases.size).toBe(3)
+  await expect(task('queue-remove.txt')).toContainText('等待上传')
+  await picker.setInputFiles(file('queue-append.txt'))
+  await expect(task('queue-append.txt')).toContainText('等待上传')
+  expect(prepared).toEqual(['queue-a.txt', 'queue-b.txt', 'queue-c.txt'])
+  await task('queue-remove.txt').getByRole('button', { name: '移除等待项' }).click()
+  await expect(task('queue-remove.txt')).toHaveCount(0)
+  await page.getByLabel('正文', { exact: true }).fill('queue does not block text')
+  await page.getByRole('button', { name: '发送', exact: true }).click()
+  await expect(page.getByRole('article').filter({ hasText: 'queue does not block text' })).toHaveCount(1)
+  releases.get('queue-b.txt')!()
+  await expect(task('queue-b.txt')).toContainText('上传失败')
+  await expect.poll(() => releases.size).toBe(4)
+  expect(prepared).toEqual(['queue-a.txt', 'queue-b.txt', 'queue-c.txt', 'queue-append.txt'])
+  for (const name of ['queue-c.txt', 'queue-append.txt', 'queue-a.txt']) {
+    releases.get(name)!()
+    await expect(task(name)).toContainText('上传成功')
+  }
+  const messages = page.getByRole('article').filter({ hasText: /queue-(a|c|append)\.txt/ })
+  await expect(messages).toHaveCount(3)
+  await expect(messages.nth(0)).toContainText('queue-c.txt')
+  await expect(messages.nth(1)).toContainText('queue-append.txt')
+  await expect(messages.nth(2)).toContainText('queue-a.txt')
+  await page.unrouteAll({ behavior: 'wait' })
+  await page.reload()
+  await expect(page.getByRole('button', { name: '选择文件' })).toBeEnabled()
+}
+
+async function verifyQueueRecovery(page: Page) {
+  const picker = page.locator('input[type="file"]')
+  const task = (name: string) => page.locator('.upload-task').filter({ hasText: name })
+  const names = ['recovery-a.txt', 'recovery-b.txt', 'recovery-c.txt', 'recovery-wait.txt']
+  const releases = new Map<string, () => void>()
+  const prepared: string[] = []
+  await page.route('**/api/file-sends', async route => {
+    prepared.push(route.request().postDataJSON().name)
+    await route.continue()
+  })
+  await page.route('**/api/file-sends/*/attempts/*/content', async route => {
+    const name = route.request().postData()!
+    const response = await route.fetch()
+    await new Promise<void>(resolve => { releases.set(name, resolve) })
+    await route.fulfill({ response, ...(name === names[0] ? { status: 502, contentType: 'text/plain', body: 'lost' } : {}) })
+  })
+  await picker.setInputFiles(names.map(name => ({ name, mimeType: 'text/plain', buffer: Buffer.from(name) })))
+  await expect.poll(() => releases.size).toBe(3)
+  await page.context().setOffline(true)
+  releases.get(names[0])!()
+  await expect(task(names[0])).toContainText('结果未确认：')
+  page.once('dialog', dialog => dialog.accept())
+  await task(names[0]).getByRole('button', { name: '放弃确认' }).click()
+  await expect(page.getByText('仍有 1 项结果待确认：', { exact: false })).toBeVisible()
+  // 即使另一个任务已经成功并释放名额，未知项仍必须先协调，放弃不能绕过暂停。
+  releases.get(names[1])!()
+  await expect(task(names[1])).toContainText('上传成功')
+  await expect(task(names[3])).toContainText('等待上传')
+  let releaseQuery!: () => void
+  const hold = new Promise<void>(resolve => { releaseQuery = resolve })
+  let queried = false
+  await page.route('**/api/file-sends/*', async route => {
+    if (route.request().method() !== 'GET') { await route.continue(); return }
+    const response = await route.fetch()
+    queried = true
+    await hold
+    await route.fulfill({ response })
+  })
+  await page.context().setOffline(false)
+  await expect.poll(() => queried).toBe(true)
+  await expect(task(names[3])).toContainText('等待上传')
+  expect(prepared).toEqual(names.slice(0, 3))
+  releaseQuery()
+  await expect(task(names[0])).toContainText('上传成功')
+  await expect.poll(() => releases.size).toBe(4)
+  // 停止 C 只取消它的本页请求；已提交则返回成功，不干扰仍在等待响应的第四项。
+  await task(names[2]).getByRole('button', { name: '停止上传' }).click()
+  await expect(task(names[2])).toContainText('上传成功')
+  releases.get(names[2])!()
+  releases.get(names[3])!()
+  await expect(task(names[3])).toContainText('上传成功')
+  await page.unrouteAll({ behavior: 'wait' })
+  await page.reload()
+  await expect(page.getByRole('button', { name: '选择文件' })).toBeEnabled()
+}
+
 export async function verifyFiles(page: Page) {
   const picker = page.locator('input[type="file"]')
+  await verifyFileQueue(page)
+  await verifyQueueRecovery(page)
   await expect(page.getByText('单文件上限 1,024 字节', { exact: false })).toBeVisible()
   await expect(page.getByRole('button', { name: '选择文件' })).toBeEnabled()
   await picker.setInputFiles({ name: 'oversized.txt', mimeType: 'text/plain', buffer: Buffer.alloc(1025) })
@@ -63,7 +168,7 @@ export async function verifyFiles(page: Page) {
   await picker.setInputFiles({ name: 'unknown-upload.txt', mimeType: 'text/plain', buffer: Buffer.from('unknown') })
   await expect(page.getByText('结果未确认：', { exact: false })).toBeVisible()
   expect(puts).toBe(1)
-  await expect(page.getByRole('button', { name: '选择文件' })).toBeDisabled()
+  await expect(page.getByText('暂停新上传：', { exact: false })).toBeVisible()
   await page.unroute('**/api/file-sends/*/attempts/*/content')
   await page.getByRole('button', { name: '查询文件结果' }).last().click()
   await expect(page.getByText('上传成功').last()).toBeVisible()
@@ -115,7 +220,7 @@ export async function verifyFiles(page: Page) {
   page.once('dialog', dialog => dialog.accept())
   await page.getByRole('button', { name: '放弃确认' }).last().click()
   await expect(page.getByText('仍有 1 项结果待确认：', { exact: false })).toBeVisible()
-  await expect(page.getByRole('button', { name: '选择文件' })).toBeDisabled()
+  await expect(page.getByText('暂停新上传：', { exact: false })).toBeVisible()
   await page.getByRole('button', { name: '查询文件结果' }).last().click()
   // 若服务器已清理则查询会释放占用；若仍在清理则继续显示等待原因。
   await page.unrouteAll({ behavior: 'wait' })
@@ -133,18 +238,20 @@ export async function verifyFiles(page: Page) {
     await held
     await route.fulfill({ response })
   })
-  await picker.setInputFiles({ name: 'late-file.txt', mimeType: 'text/plain', buffer: Buffer.from('late') })
+  await picker.setInputFiles(['late-file.txt', 'late-second.txt', 'late-third.txt', 'late-waiting.txt'].map(name => ({ name, mimeType: 'text/plain', buffer: Buffer.from('late') })))
   await received
+  await expect(page.locator('.upload-task').filter({ hasText: 'late-waiting.txt' })).toContainText('等待上传')
   page.once('dialog', dialog => dialog.accept())
   await page.getByRole('button', { name: '退出登录' }).click()
   await expect(page.getByRole('region', { name: '消息流' })).toHaveCount(0)
   release()
   await page.unrouteAll({ behavior: 'wait' })
-  await expect(page.getByText('late-file.txt')).toHaveCount(0)
+  await expect(page.getByText(/late-(file|second|third|waiting)\.txt/)).toHaveCount(0)
   await page.getByLabel('用户名').fill('Admin')
   await page.getByLabel('密码', { exact: true }).fill(' synthetic password ')
   await page.getByRole('button', { name: '登录', exact: true }).click()
   await expect(page.getByRole('article').filter({ hasText: 'late-file.txt' })).toHaveCount(1)
+  await expect(page.getByText('late-waiting.txt', { exact: false })).toHaveCount(0)
 
   let releaseExpiry!: () => void
   let arrivedExpiry!: () => void
@@ -157,13 +264,14 @@ export async function verifyFiles(page: Page) {
     await route.fulfill({ response })
   })
   await expect(page.getByRole('button', { name: '选择文件' })).toBeEnabled()
-  await picker.setInputFiles({ name: 'expired-file.txt', mimeType: 'text/plain', buffer: Buffer.from('expired') })
+  await picker.setInputFiles(['expired-file.txt', 'expired-second.txt', 'expired-third.txt', 'expired-waiting.txt'].map(name => ({ name, mimeType: 'text/plain', buffer: Buffer.from('expired') })))
   await expiryReceived
+  await expect(page.locator('.upload-task').filter({ hasText: 'expired-waiting.txt' })).toContainText('等待上传')
   await page.clock.fastForward(43_200_000)
   await expect(page.getByRole('region', { name: '消息流' })).toHaveCount(0)
   releaseExpiry()
   await page.unrouteAll({ behavior: 'wait' })
-  await expect(page.getByText('expired-file.txt')).toHaveCount(0)
+  await expect(page.getByText(/expired-(file|second|third|waiting)\.txt/)).toHaveCount(0)
   await page.getByLabel('用户名').fill('Admin')
   await page.getByLabel('密码', { exact: true }).fill(' synthetic password ')
   await page.getByRole('button', { name: '登录', exact: true }).click()
