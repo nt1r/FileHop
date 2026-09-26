@@ -19,7 +19,7 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
   const xhr = useRef(new Map<string, XMLHttpRequest>())
   const controls = useRef(new Map<string, AbortController>())
   const [online, setOnline] = useState(navigator.onLine)
-  const preparingQueue = useRef(false)
+  const preparingQueue = useRef<AbortController | null>(null)
   live.current = active
   const expired = useRef(onExpired)
   expired.current = onExpired
@@ -36,6 +36,7 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
     for (const controller of controls.current.values()) controller.abort()
     xhr.current.clear(); controls.current.clear()
     tasksRef.current = []
+    preparingQueue.current = null
     limitsRef.current = 'loading'
   }
   function suspend(clear: boolean) {
@@ -54,8 +55,10 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
     }
     for (const controller of controls.current.values()) controller.abort()
     controls.current.clear()
+    preparingQueue.current = null
     if (clear) update([])
-    else update(tasksRef.current.map(task => task.pending ? { ...task, status: unknown, pending: false, unresolved: true, stopping: false } : task))
+    // 原来已查到“仍活动”的任务也必须在新会话重新协调，不能沿用旧的可调度判断。
+    else update(tasksRef.current.map(task => task.pending || uncertain(task) ? { ...task, status: unknown, pending: false, unresolved: true, stopping: false } : task))
     setLimits('loading'); limitsRef.current = 'loading'
   }
   async function refresh() {
@@ -70,6 +73,7 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
       if (version !== epoch.current || !live.current) return
       if (response.status === 401 && !response.headers.has('x-filehop-access-layer')) {
         const error = await response.json()
+        if (version !== epoch.current || !live.current) return
         if (error.code === 'session_invalid') { expired.current(); return }
       }
       if (!response.ok || response.headers.has('x-filehop-access-layer') || !response.headers.get('content-type')?.includes('application/json')) throw Error()
@@ -79,15 +83,14 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
         typeof data.max_file_size_bytes !== 'number' || !Number.isSafeInteger(data.max_file_size_bytes) || data.max_file_size_bytes < 0) throw Error()
       limitsRef.current = data.max_file_size_bytes
       setLimits(data.max_file_size_bytes)
+      // 新登录先取得当前能力，再查询原发送身份；全部未知项协调前仍由 unresolved 挡住等待项。
+      // 重查限制成功也走这条路径，避免一次网络失败让恢复永久停住；查询不会自动重传失败项。
+      for (const task of tasksRef.current.filter(task => uncertain(task) && !task.pending)) void inspect(task, false)
     } catch { if (version === epoch.current && live.current) { limitsRef.current = 'unavailable'; setLimits('unavailable') } }
     finally { window.clearTimeout(timer); if (controls.current.get('limits') === controller) controls.current.delete('limits') }
   }
   useEffect(() => {
-    if (active) {
-      void refresh()
-      // 重新登录先协调旧尝试；绝不根据保存的 File 引用自动重新发送失败项。
-      for (const task of tasksRef.current.filter(task => uncertain(task) && !task.pending)) void inspect(task, false)
-    }
+    if (active) void refresh()
     // 新会话必须重新取得有效限制；旧快照不是服务器的准入保证。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active])
@@ -116,7 +119,6 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
     if (!task) return
     patch(task.sendId, { queued: false, pending: true, status: '准备上传…' })
     // 准入持有短时全局锁；本页依次申请，获准后文件体仍可三个并行，避免自己触发背压拒绝。
-    preparingQueue.current = true
     void prepare(task)
   }
   useEffect(() => { pump() }, [tasks, limits, active, online])
@@ -160,6 +162,7 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
     const { file, source } = task
     const version = epoch.current
     const preparing = new AbortController()
+    preparingQueue.current = preparing
     controls.current.set(task.sendId, preparing)
     const timer = window.setTimeout(() => preparing.abort(), 15000)
     try {
@@ -190,7 +193,8 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
     } finally {
       window.clearTimeout(timer)
       if (controls.current.get(task.sendId) === preparing) controls.current.delete(task.sendId)
-      preparingQueue.current = false
+      // 旧认证周期的 finally 不能解开新请求持有的准入锁。
+      if (preparingQueue.current === preparing) preparingQueue.current = null
       pump()
     }
   }
@@ -235,7 +239,7 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
   }
   // 未收到响应时先查发送身份；只有服务器确认失败且旧实体清理完成，才允许从头重传。
   async function inspect(task: Task, retry: boolean) {
-    if (!live.current || task.queued || task.pending || task.stopping || (retry && task.abandoned)) return
+    if (!live.current || typeof limitsRef.current !== 'number' || task.queued || task.pending || task.stopping || (retry && task.abandoned)) return
     if (retry && (!navigator.onLine || typeof limitsRef.current !== 'number' ||
       tasksRef.current.some(item => item.sendId !== task.sendId && item.unresolved))) return
     if (!uncertain(task) && tasksRef.current.filter(item => item.pending || uncertain(item)).length >= 3) return
