@@ -148,7 +148,7 @@ bash scripts/dev.sh /srv/filehop-dev host stop
 
 dev/main 的 push 基础检查不构建镜像，因此不会刷新对应分支的 Docker 缓存；PR 写入的缓存也不会自动成为后续其他 PR 可复用的基分支缓存。依赖、工具链或基础镜像有较大更新后，如需改善后续 PR 的容器构建耗时，可在合入 dev 后选择 dev 手动运行一次完整检查，刷新其 Docker 缓存。这是可选的性能维护，不是正确性门槛；不为预热缓存恢复每次 push 的镜像构建。
 
-首次运行、依赖/工具链更新或缓存被淘汰后仍可能下载；缓存命中也仍执行安装与正确性检查。宿主 Cargo/pnpm 缓存与 Docker 构建缓存互不共享。后端 Dockerfile 目前源码改变会使 release 编译层失效，目前仅使用跨运行层缓存，尚未引入依赖预编译分层。Playwright 浏览器和 Linux 系统依赖暂不缓存；默认 headless Chromium 检查使用 `playwright install --with-deps --only-shell chromium`，不下载未使用的完整 Chrome。稳定版 Chrome 人工验收仍需单独安装对应浏览器，不受此优化替代。Caddy 仅在入口检查被选中时下载，仍执行固定 SHA-512 校验；不新增工具缓存。
+首次运行、依赖/工具链更新或缓存被淘汰后仍可能下载；缓存命中也仍执行安装与正确性检查。宿主 Cargo/pnpm 缓存与 Docker 构建缓存互不共享。后端 Dockerfile 在复制业务源码前，按固定 manifest/锁文件和当前隐式 lib/bin 目标编译依赖，再用 `cargo clean --release --package backend` 删除应用占位产物。业务源码或迁移变化只重新执行应用编译层；依赖层通过既有 BuildKit `mode=max` 跨运行复用，不依赖未导出的 cache mount。新增 Cargo target、build.rs、路径依赖或 workspace 时必须同步调整此层，不能把占位构建当作真实应用检查。冷缓存仍执行完整依赖和应用构建。Playwright 浏览器和 Linux 系统依赖暂不缓存；默认 headless Chromium 检查使用 `playwright install --with-deps --only-shell chromium`，不下载未使用的完整 Chrome。稳定版 Chrome 人工验收仍需单独安装对应浏览器，不受此优化替代。Caddy 仅在入口检查被选中时下载，仍执行固定 SHA-512 校验；不新增工具缓存。
 
 验证冷/热缓存时，选择会触发容器检查的 PR 首次运行与再次运行，或对同一提交手动运行两次完整检查：两次完整检查都应通过；第二次 pnpm/Cargo 步骤应报告缓存恢复，Docker 应出现缓存导入及适用层的 `CACHED`，且两个容器冒烟仍执行。需要强制冷缓存时，在临时测试分支更换缓存键前缀和 Docker scope，不删除共享缓存。实际命中率与耗时以对应运行日志为准，本地静态校验不能代替此验证。
 
