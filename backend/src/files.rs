@@ -43,6 +43,10 @@ impl Default for TransferConfig {
 }
 pub(crate) struct Transfers {
     pub gate: Mutex<()>,
+    // 只串行化下载打开与删除接受；不在整个传输期间持锁。
+    pub admission: Mutex<()>,
+    pub readers: std::sync::Mutex<std::collections::HashMap<String, usize>>,
+    pub deletion_cursor: std::sync::Mutex<Option<String>>,
     pub slots: Arc<Semaphore>,
     pub preparations: Arc<Semaphore>,
     pub downloads: Arc<Semaphore>,
@@ -54,6 +58,9 @@ impl Transfers {
     pub fn new(limit: usize) -> Self {
         Self {
             gate: Mutex::new(()),
+            admission: Mutex::new(()),
+            readers: std::sync::Mutex::new(std::collections::HashMap::new()),
+            deletion_cursor: std::sync::Mutex::new(None),
             slots: Arc::new(Semaphore::new(limit)),
             preparations: Arc::new(Semaphore::new(limit)),
             downloads: Arc::new(Semaphore::new(limit)),
@@ -302,6 +309,8 @@ pub async fn recover(
             break;
         }
     }
+    // 已提交删除失败仍保留占用，不能阻止其余空余额度的上传或历史读取。
+    cleanup_deleted_files(&service, &mut db).await;
     // 只有由本应用安全 UUID 命名的文件才参与协调；未知目录项不擅自删除。
     // 数据库中已有成功记录即使实体缺失也保留历史及额度，下载再如实报告存储异常。
     for entry in std::fs::read_dir(files)? {
@@ -376,10 +385,10 @@ pub(crate) async fn storage(State(service): State<Arc<Service>>, headers: Header
     // 一条 SELECT 读取同一数据库快照，避免提交或清理恰好发生在分类查询之间，
     // 导致同一份预留被重复计入或遗漏。临时文件已经包含在完整预留中，不另扫磁盘。
     let usage: Result<(i64, i64, i64), _> = sqlx::query_as(
-        "SELECT COALESCE(SUM(CASE WHEN state='success' THEN reserved ELSE 0 END),0),
-                COALESCE(SUM(CASE WHEN state IN ('prepared','writing') THEN reserved ELSE 0 END),0),
-                COALESCE(SUM(CASE WHEN state='cleaning' THEN reserved ELSE 0 END),0)
-         FROM file_send",
+        "SELECT COALESCE(SUM(CASE WHEN s.state='success' AND m.file_state IN ('available','storage_error') THEN reserved ELSE 0 END),0),
+                COALESCE(SUM(CASE WHEN s.state IN ('prepared','writing') THEN reserved ELSE 0 END),0),
+                COALESCE(SUM(CASE WHEN s.state='cleaning' OR m.file_state='deleting' THEN reserved ELSE 0 END),0)
+         FROM file_send s LEFT JOIN message m ON m.send_id=s.send_id",
     )
     .fetch_one(&mut db)
     .await;
@@ -1329,6 +1338,166 @@ pub(crate) async fn content(
     }
 }
 
+// 读取占用属于进程内句柄，绝不持久化；重启后不会残留虚假的“正在下载”。
+struct ActiveRead {
+    transfers: Arc<Transfers>,
+    file_id: String,
+}
+impl ActiveRead {
+    fn new(transfers: Arc<Transfers>, file_id: String) -> Self {
+        *transfers
+            .readers
+            .lock()
+            .unwrap()
+            .entry(file_id.clone())
+            .or_default() += 1;
+        Self { transfers, file_id }
+    }
+}
+impl Drop for ActiveRead {
+    fn drop(&mut self) {
+        let mut readers = self.transfers.readers.lock().unwrap();
+        if let Some(count) = readers.get_mut(&self.file_id) {
+            *count -= 1;
+            if *count == 0 {
+                readers.remove(&self.file_id);
+            }
+        }
+    }
+}
+
+pub(crate) async fn delete(
+    State(service): State<Arc<Service>>,
+    headers: HeaderMap,
+    Path(raw): Path<String>,
+) -> Response {
+    let (mut db, _) = match authenticate(&service, &headers).await {
+        Ok(value) => value,
+        Err(e) => return *e,
+    };
+    if !write_origin_allowed(&service, &headers) {
+        return error(StatusCode::FORBIDDEN, "origin_rejected", "请求来源不被允许");
+    }
+    let Some(file_id) = id(&raw) else {
+        return error(StatusCode::NOT_FOUND, "file_not_found", "文件不可用");
+    };
+    // 与下载的状态检查、打开及占用登记共用裁决锁；已有读取只拒绝，绝不排队删除。
+    let _admission = service.transfers.admission.lock().await;
+    let current = match known_status(&mut db, &file_id).await {
+        Ok(Some(value)) => value,
+        Ok(None) => return error(StatusCode::NOT_FOUND, "file_not_found", "文件不可用"),
+        Err(_) => return unavailable(),
+    };
+    if current.file_state == "deleted" {
+        return json(StatusCode::OK, current);
+    }
+    if current.file_state == "deleting" {
+        return json(StatusCode::ACCEPTED, current);
+    }
+    if service
+        .transfers
+        .readers
+        .lock()
+        .unwrap()
+        .contains_key(&file_id)
+    {
+        return error(
+            StatusCode::CONFLICT,
+            "FILE_IN_USE",
+            "文件正在下载，请结束后重试",
+        );
+    }
+    // 发送成功身份与预留字节保持不变；占用分类由同一条消息状态决定，
+    // 因而提交删除接受后已保存转为待清理，总占用不变。
+    let mut tx = match db.begin().await {
+        Ok(v) => v,
+        Err(_) => return unavailable(),
+    };
+    if sqlx::query("UPDATE message SET file_state='deleting',state_version=state_version+1 WHERE file_id=? AND kind='FILE' AND file_state IN ('available','storage_error')")
+        .bind(&file_id).execute(&mut *tx).await.is_err() { return unavailable(); }
+    let accepted = match known_status(&mut tx, &file_id).await {
+        Ok(Some(v)) => v,
+        _ => return unavailable(),
+    };
+    if tx.commit().await.is_err() {
+        return unavailable();
+    }
+    json(StatusCode::ACCEPTED, accepted)
+}
+
+pub(crate) async fn cleanup_deleted_files(service: &Service, db: &mut SqliteConnection) -> bool {
+    let cursor = service.transfers.deletion_cursor.lock().unwrap().clone();
+    let rows: Result<Vec<String>, _> = sqlx::query_scalar("SELECT file_id FROM message WHERE kind='FILE' AND file_state='deleting' AND (? IS NULL OR file_id > ?) ORDER BY file_id LIMIT 64")
+        .bind(&cursor).bind(&cursor).fetch_all(&mut *db).await;
+    let mut rows = match rows {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    if rows.is_empty() && cursor.is_some() {
+        rows = match sqlx::query_scalar("SELECT file_id FROM message WHERE kind='FILE' AND file_state='deleting' ORDER BY file_id LIMIT 64")
+            .fetch_all(&mut *db).await {
+            Ok(v) => v,
+            Err(_) => return false,
+        };
+    }
+    *service.transfers.deletion_cursor.lock().unwrap() = rows.last().cloned();
+    let mut success = true;
+    for file_id in rows {
+        if !cleanup_deleted_file(service, db, &file_id).await {
+            // 不输出路径或用户文件名；单个故障不阻止本轮其他文件清理。
+            eprintln!("file cleanup pending: {file_id}");
+            success = false;
+        }
+    }
+    success
+}
+async fn cleanup_deleted_file(service: &Service, db: &mut SqliteConnection, file_id: &str) -> bool {
+    if id(file_id).as_deref() != Some(file_id) {
+        return false;
+    }
+    if !matches!(
+        crate::storage::inspect(&service.database, &service.files).await,
+        crate::storage::Status::Initialized
+    ) {
+        return false;
+    }
+    // 只 unlink 精确受管名称，不跟随符号链接，不递归删除异常目录。
+    // 缺失不是全局健康的证据，删除后必须再次验证身份并同步目录。
+    let (_, path) = paths(service, file_id);
+    match fs::remove_file(path).await {
+        Ok(()) => (),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+        Err(_) => return false,
+    }
+    if !matches!(
+        crate::storage::inspect(&service.database, &service.files).await,
+        crate::storage::Status::Initialized
+    ) || std::fs::File::open(&service.files)
+        .and_then(|dir| dir.sync_all())
+        .is_err()
+    {
+        return false;
+    }
+    // 实体可靠清理之后才在同一事务内标记完成并清零原占用；
+    // 崩溃或提交失败时仍为删除中，重试不会重复释放其他文件的额度。
+    let mut tx = match db.begin().await {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    let changed = match sqlx::query("UPDATE message SET file_state='deleted',state_version=state_version+1 WHERE file_id=? AND file_state='deleting'")
+        .bind(file_id).execute(&mut *tx).await { Ok(v) => v.rows_affected(), Err(_) => return false };
+    if changed == 1
+        && sqlx::query("UPDATE file_send SET reserved=0 WHERE file_id=? AND state='success'")
+            .bind(file_id)
+            .execute(&mut *tx)
+            .await
+            .is_err()
+    {
+        return false;
+    }
+    tx.commit().await.is_ok()
+}
+
 #[derive(serde::Serialize, sqlx::FromRow)]
 struct FileStatus {
     file_id: String,
@@ -1475,6 +1644,7 @@ async fn record_storage_error(
 
 pub(crate) async fn download(
     State(service): State<Arc<Service>>,
+    method: axum::http::Method,
     headers: HeaderMap,
     Path(file_id): Path<String>,
 ) -> Response {
@@ -1485,6 +1655,7 @@ pub(crate) async fn download(
     let Some(file_id) = id(&file_id) else {
         return error(StatusCode::NOT_FOUND, "file_not_found", "文件不可用");
     };
+    let admission = service.transfers.admission.lock().await;
     let row: Option<(String, i64, String)> = match sqlx::query_as(
         "SELECT file_name,file_size,file_state FROM message WHERE file_id=? AND kind='FILE'",
     )
@@ -1498,6 +1669,9 @@ pub(crate) async fn download(
     let Some((name, size, state)) = row else {
         return error(StatusCode::NOT_FOUND, "file_not_found", "文件不可用");
     };
+    if state == "deleting" || state == "deleted" {
+        return error(StatusCode::GONE, "file_deleted", "服务器文件已接受删除");
+    }
     if state != "available" {
         return error(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -1564,11 +1738,26 @@ pub(crate) async fn download(
             );
         }
     };
+    // HEAD 仅检查可用性，不启动读盘任务，也不留下活动读取占用。
+    if method == axum::http::Method::HEAD {
+        let mut response = Body::empty().into_response();
+        response
+            .headers_mut()
+            .insert(header::CONTENT_LENGTH, size.to_string().parse().unwrap());
+        response
+            .headers_mut()
+            .insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
+        return response;
+    }
+    let reading = ActiveRead::new(service.transfers.clone(), file_id);
+    drop(admission);
     let idle = service.config.transfer.download_idle_timeout;
     // 有界通道限制缓冲量；客户端不消费时，生产者的发送也受独立期限约束。
     let (sender, receiver) = tokio::sync::mpsc::channel::<Result<Vec<u8>, std::io::Error>>(2);
     tokio::spawn(async move {
         let _permit = permit;
+        // 声明顺序保证文件先关闭，随后才移除读取占用（含出错、取消及 panic）。
+        let _reading = reading;
         use tokio::io::AsyncReadExt;
         let mut file = file;
         let mut remaining = size as u64;
