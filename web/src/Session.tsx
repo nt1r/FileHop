@@ -8,6 +8,7 @@ import Messages from './Messages'
 import ServerFiles from './ServerFiles'
 import { useMessages } from './messages'
 import { useFiles } from './files'
+import { useDeletion } from './deletion'
 
 type Session = { expires_at: number; server_time: number }
 type Phase = 'checking' | 'login' | 'authenticated' | 'unknown' | 'logout-pending'
@@ -69,6 +70,7 @@ export default function SessionPage() {
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const exchange = useMessages(phase === 'authenticated', expire)
   const files = useFiles(phase === 'authenticated', expire, exchange.receivedFile, exchange.refreshFileStates)
+  const deletion = useDeletion(phase === 'authenticated', exchange, expire)
 
   useEffect(() => {
     const remaining = retryAt - Date.now()
@@ -84,6 +86,7 @@ export default function SessionPage() {
     setPage('messages')
     exchange.suspend(true)
     files.suspend(true)
+    deletion.suspend(true)
     generation.current++
     logoutPending.current = notice === 'logout-pending'
     deadline.current = null
@@ -120,6 +123,7 @@ export default function SessionPage() {
     // 先使在途读取失效，再隐藏受保护内容；旧响应不能把页面带回已登录状态。
     exchange.suspend(false)
     files.suspend(false)
+    deletion.suspend(false)
     generation.current++
     deadline.current = null
     clearTimeout(timer.current)
@@ -151,6 +155,7 @@ export default function SessionPage() {
       if (error instanceof ApplicationError && error.code === 'session_invalid') {
         exchange.suspend(false)
         files.suspend(false)
+        deletion.suspend(false)
         deadline.current = null
         clearTimeout(timer.current)
         setPhase('login')
@@ -262,7 +267,7 @@ export default function SessionPage() {
         <Button variant={page === 'files' ? 'primary' : 'secondary'} aria-pressed={page === 'files'} onClick={() => setPage('files')}>服务器文件</Button>
       </nav>
       {/* 草稿、发送与上传调度由会话层持有，切换视图不改变认证或任务生命周期。 */}
-      {page === 'messages' ? <Messages exchange={exchange} files={files} /> : <ServerFiles files={files} exchange={exchange} onExpired={expire} />}
+      {page === 'messages' ? <Messages exchange={exchange} files={files} deletion={deletion} /> : <ServerFiles files={files} exchange={exchange} deletion={deletion} onExpired={expire} />}
     </>}
   </section>
 }

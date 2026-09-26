@@ -5,10 +5,12 @@ import { Text } from '@cloudflare/kumo/components/text'
 import { fileStateLabels, isMessage, type Message, type useMessages } from './messages'
 import type { useFiles } from './files'
 import StorageUsage from './StorageUsage'
+import type { useDeletion } from './deletion'
+import DeleteFile from './DeleteFile'
 
 type FileMessage = Extract<Message, { kind: 'FILE' }>
 
-export default function ServerFiles({ files, exchange, onExpired }: { files: ReturnType<typeof useFiles>; exchange: ReturnType<typeof useMessages>; onExpired: () => void }) {
+export default function ServerFiles({ files, exchange, deletion, onExpired }: { files: ReturnType<typeof useFiles>; exchange: ReturnType<typeof useMessages>; deletion: ReturnType<typeof useDeletion>; onExpired: () => void }) {
   const [usageRefresh, setUsageRefresh] = useState(0)
   const [items, setItems] = useState<FileMessage[]>([])
   const [before, setBefore] = useState<string | null>(null)
@@ -76,8 +78,7 @@ export default function ServerFiles({ files, exchange, onExpired }: { files: Ret
         <div><Text variant="heading3" as="h2">服务器文件</Text><Text variant="secondary" size="sm">按成功上传顺序展示；仅管理经 FileHop 提交的文件。</Text></div>
         <Button variant="secondary" disabled={busy} onClick={() => { void load(); setUsageRefresh(value => value + 1) }}>刷新文件列表</Button>
       </div>
-      <StorageUsage refresh={usageRefresh} onExpired={onExpired} />
-      <Text variant="secondary" size="sm">当前提供列表、下载和用量；删除尚未开放。</Text>
+      <StorageUsage refresh={usageRefresh + deletion.usageRevision} onExpired={onExpired} />
       {notice && <Text role="status" variant="error">{notice}</Text>}
       {exchange.fileStatusNotice && <Text role="status" variant="error">{exchange.fileStatusNotice}</Text>}
       {busy && <Text role="status">正在读取文件列表…</Text>}
@@ -87,7 +88,8 @@ export default function ServerFiles({ files, exchange, onExpired }: { files: Ret
         <Text>{file.file_size.toLocaleString('zh-CN')} 字节 · {file.source_label}</Text>
         <Text as="time" {...{ dateTime: file.created_at }}>上传时间：{file.created_at}</Text>
         <Text>{fileStateLabels[file.file_state]}</Text>
-        {file.file_state === 'available' && <a href={`/api/files/${encodeURIComponent(file.file_id)}`} download onClick={event => { event.preventDefault(); void download(file.file_id) }}>下载附件</a>}
+        {file.file_state === 'available' && !deletion.blocksDownload(file.file_id) && <a href={`/api/files/${encodeURIComponent(file.file_id)}`} download onClick={event => { event.preventDefault(); void download(file.file_id) }}>下载附件</a>}
+        <DeleteFile file={file} deletion={deletion} />
       </LayerCard>)}
       {hasMore && <Button variant="secondary" disabled={busy} onClick={() => void load(true)}>加载更多文件</Button>}
     </LayerCard>

@@ -6,8 +6,10 @@ import { LayerCard } from '@cloudflare/kumo/components/layer-card'
 import { Text } from '@cloudflare/kumo/components/text'
 import { fileStateLabels, type useMessages, validLabel, validText } from './messages'
 import { type useFiles } from './files'
+import type { useDeletion } from './deletion'
+import DeleteFile from './DeleteFile'
 
-export default function Messages({ exchange, files }: { exchange: ReturnType<typeof useMessages>; files: ReturnType<typeof useFiles> }) {
+export default function Messages({ exchange, files, deletion }: { exchange: ReturnType<typeof useMessages>; files: ReturnType<typeof useFiles>; deletion: ReturnType<typeof useDeletion> }) {
   const { model, label } = exchange
   useEffect(() => {
     void exchange.refreshFileStates()
@@ -89,7 +91,8 @@ export default function Messages({ exchange, files }: { exchange: ReturnType<typ
             {/* 文件消息不是空文本；只展示元数据，下载交给浏览器处理，不把不可信内容内联渲染。 */}
             <Text>{message.file_name} · {message.file_size.toLocaleString('zh-CN')} 字节 · {message.file_mime || '未知类型'}</Text>
             <Text>{fileStateLabels[message.file_state]}</Text>
-            {message.file_state === 'available' && <a href={`/api/files/${encodeURIComponent(message.file_id)}`} download onClick={event => { event.preventDefault(); void download(message.file_id) }}>下载附件</a>}
+            {message.file_state === 'available' && !deletion.blocksDownload(message.file_id) && <a href={`/api/files/${encodeURIComponent(message.file_id)}`} download onClick={event => { event.preventDefault(); void download(message.file_id) }}>下载附件</a>}
+            <DeleteFile file={message} deletion={deletion} />
           </div>}
         </LayerCard>)}
       </div>

@@ -335,6 +335,7 @@ export function useMessages(active: boolean, onExpired: () => void) {
   }, [])
   return { model, label, setLabel, saveLabel, read, send, retry, query, abandon, suspend,
     rememberFiles, projectFile, refreshFileStates, fileStatusNotice,
+    fileStatus: (id: string) => knownFiles.current.get(id),
     refresh: async () => { await read(); await refreshFileStates() },
     receivedFile: (message: Message) => { if (enabled.current) merge([message]) },
     hasUnsaved: () => Boolean(current.current.draft || current.current.attempt),
