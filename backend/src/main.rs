@@ -1,3 +1,4 @@
+// Synthetic source-only CI scope validation; do not merge.
 use clap::{Parser, Subcommand};
 use std::{net::SocketAddr, path::PathBuf};
 use tokio::signal;
