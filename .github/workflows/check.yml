@@ -22,43 +22,24 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
-      - name: Select container checks
+      - name: Select check scope
         id: scope
+        shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_REF: ${{ github.base_ref }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          containers=false
-          if [[ "$EVENT_NAME" == workflow_dispatch || ( "$EVENT_NAME" == pull_request && "$BASE_REF" == main ) ]]; then
-            containers=true
-          elif [[ "$EVENT_NAME" == pull_request ]]; then
-            # Compare the entire PR, not just its last commit. Disable rename
-            # detection so moving a watched file away still triggers checks.
-            changes=$(mktemp)
-            trap 'rm -f -- "$changes"' EXIT
-            git diff --name-only --no-renames -z "$BASE_SHA...$HEAD_SHA" > "$changes"
-            while IFS= read -r -d '' path; do
-              case "$path" in
-                deploy/*|scripts/*|.github/*|tests/*|.dockerignore|.env.example|.nvmrc|rust-toolchain*|\
-                Cargo.toml|Cargo.lock|backend/Cargo.toml|backend/Cargo.lock|\
-                .cargo/*|backend/.cargo/*|backend/build.rs|backend/migrations/*|\
-                package.json|pnpm-lock.yaml|pnpm-workspace.yaml|.npmrc|\
-                web/package.json|web/pnpm-lock.yaml|web/pnpm-workspace.yaml|web/.npmrc|\
-                web/.pnpmfile.*|web/patches/*|web/*config*|web/index.html)
-                  containers=true
-                  break
-                  ;;
-              esac
-            done < "$changes"
-          fi
-          echo "containers=$containers" >> "$GITHUB_OUTPUT"
-          echo "Container checks: $containers"
+          bash scripts/ci-scope.sh "$EVENT_NAME" "$BASE_REF" "$BASE_SHA" "$HEAD_SHA" | tee -a "$GITHUB_OUTPUT"
+      - name: Check scope regression tests
+        run: bash tests/ci_scope.sh
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: steps.scope.outputs.application == 'true'
         with:
           node-version-file: .nvmrc
       - name: Toolchains
+        if: steps.scope.outputs.application == 'true'
         run: |
           corepack enable pnpm
           corepack prepare pnpm@12.5.1 --activate
@@ -70,8 +51,10 @@ jobs:
       # from pull_request runs under refs/pull/<number>/merge.
       - name: Locate pnpm store
         id: pnpm-store
+        if: steps.scope.outputs.application == 'true'
         run: echo "path=$(pnpm -C web store path --silent)" >> "$GITHUB_OUTPUT"
       - name: Cache pnpm downloads
+        if: steps.scope.outputs.application == 'true'
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
@@ -79,30 +62,45 @@ jobs:
           restore-keys: |
             checks-pnpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.nvmrc', 'web/package.json') }}-
       - name: Cache Cargo downloads and dependency builds
+        if: steps.scope.outputs.application == 'true'
         uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
         with:
           prefix-key: checks-rust-v1
           key: ${{ runner.os }}-${{ runner.arch }}
           workspaces: backend -> target
           cache-bin: false
-      - name: Rust checks
+      - name: Rust formatting and Clippy
+        if: steps.scope.outputs.application == 'true'
         run: |
           cargo fmt --manifest-path backend/Cargo.toml --check
           cargo clippy --manifest-path backend/Cargo.toml --locked --all-targets -- -D warnings
-          cargo test --manifest-path backend/Cargo.toml --locked
-          cargo test --manifest-path backend/Cargo.toml --locked --test files_process bounded_memory -- --ignored --nocapture
-          cargo build --manifest-path backend/Cargo.toml --locked
+      - name: Rust integration tests
+        if: steps.scope.outputs.application == 'true'
+        run: cargo test --manifest-path backend/Cargo.toml --locked
+      - name: Bounded memory regression
+        if: steps.scope.outputs.application == 'true'
+        run: cargo test --manifest-path backend/Cargo.toml --locked --test files_process bounded_memory -- --ignored --nocapture
+      - name: Build backend
+        if: steps.scope.outputs.application == 'true'
+        run: cargo build --manifest-path backend/Cargo.toml --locked
       - name: Shell syntax
+        if: steps.scope.outputs.application == 'true'
         run: |
           for script in scripts/*.sh tests/*.sh; do bash -n "$script"; done
           bash tests/dev_script.sh
-      - name: Web checks
+      - name: Install web dependencies
+        if: steps.scope.outputs.application == 'true'
+        run: pnpm -C web install --frozen-lockfile
+      - name: Web lint and build
+        if: steps.scope.outputs.application == 'true'
         run: |
-          pnpm -C web install --frozen-lockfile
           pnpm -C web run lint
           pnpm -C web run build
-          pnpm -C web exec playwright install --with-deps chromium
+      - name: Install headless browser
+        if: steps.scope.outputs.application == 'true'
+        run: pnpm -C web exec playwright install --with-deps --only-shell chromium
       - name: Isolated HTTPS ingress
+        if: steps.scope.outputs.ingress == 'true'
         run: |
           root=$(mktemp -d -t filehop-caddy-ci-XXXXXXXX)
           trap '[[ "$root" == /tmp/filehop-caddy-ci-* && -d "$root" && ! -L "$root" ]] && rm -rf -- "$root"' EXIT
@@ -110,9 +108,11 @@ jobs:
           echo "8220d1f013b6f27510247b2360c9e0ca9f018feebd82515f07635318b34ff9777ccc8fd0b6e6f2486ce3a33fe389fbb7db12d05baa474f4587509fb4f5ebf1c9  $root/caddy.tar.gz" | sha512sum --check
           tar -xzf "$root/caddy.tar.gz" -C "$root" caddy
           PATH="$root:$PATH" bash tests/caddy_ingress.sh
-      - name: Browser initialization loop
+      - name: Browser application regression
+        if: steps.scope.outputs.application == 'true'
         run: bash tests/browser.sh
       - name: Compose configuration
+        if: steps.scope.outputs.application == 'true'
         run: docker compose --env-file .env.example -f deploy/compose.dev.yml config --quiet
       - name: Set up Docker Buildx
         if: steps.scope.outputs.containers == 'true'
