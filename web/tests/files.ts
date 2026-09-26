@@ -254,12 +254,13 @@ export async function verifyFiles(page: Page) {
   await expect(page.getByText('late-waiting.txt', { exact: false })).toHaveCount(0)
 
   let releaseExpiry!: () => void
+  let expiryCount = 0
   let arrivedExpiry!: () => void
   const expiryHold = new Promise<void>(resolve => { releaseExpiry = resolve })
   const expiryReceived = new Promise<void>(resolve => { arrivedExpiry = resolve })
   await page.route('**/api/file-sends/*/attempts/*/content', async route => {
     const response = await route.fetch()
-    arrivedExpiry()
+    if (++expiryCount === 3) arrivedExpiry()
     await expiryHold
     await route.fulfill({ response })
   })
@@ -275,7 +276,7 @@ export async function verifyFiles(page: Page) {
   await page.getByLabel('用户名').fill('Admin')
   await page.getByLabel('密码', { exact: true }).fill(' synthetic password ')
   await page.getByRole('button', { name: '登录', exact: true }).click()
-  await expect(page.getByText('上传成功').last()).toBeVisible()
+  await expect(page.locator('.upload-task').filter({ hasText: 'expired-waiting.txt' })).toContainText('上传成功')
   await expect(page.getByRole('button', { name: '选择文件' })).toBeEnabled()
   page.once('dialog', dialog => dialog.accept())
   await page.reload()
