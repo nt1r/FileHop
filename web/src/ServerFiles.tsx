@@ -4,10 +4,12 @@ import { LayerCard } from '@cloudflare/kumo/components/layer-card'
 import { Text } from '@cloudflare/kumo/components/text'
 import { fileStateLabels, isMessage, type Message, type useMessages } from './messages'
 import type { useFiles } from './files'
+import StorageUsage from './StorageUsage'
 
 type FileMessage = Extract<Message, { kind: 'FILE' }>
 
 export default function ServerFiles({ files, exchange, onExpired }: { files: ReturnType<typeof useFiles>; exchange: ReturnType<typeof useMessages>; onExpired: () => void }) {
+  const [usageRefresh, setUsageRefresh] = useState(0)
   const [items, setItems] = useState<FileMessage[]>([])
   const [before, setBefore] = useState<string | null>(null)
   const [hasMore, setHasMore] = useState(false)
@@ -72,9 +74,10 @@ export default function ServerFiles({ files, exchange, onExpired }: { files: Ret
     <LayerCard className="panel">
       <div className="panel-heading">
         <div><Text variant="heading3" as="h2">服务器文件</Text><Text variant="secondary" size="sm">按成功上传顺序展示；仅管理经 FileHop 提交的文件。</Text></div>
-        <Button variant="secondary" disabled={busy} onClick={() => void load()}>刷新文件列表</Button>
+        <Button variant="secondary" disabled={busy} onClick={() => { void load(); setUsageRefresh(value => value + 1) }}>刷新文件列表</Button>
       </div>
-      <Text variant="secondary" size="sm">当前提供列表和下载；删除与应用文件额度尚未开放。</Text>
+      <StorageUsage refresh={usageRefresh} onExpired={onExpired} />
+      <Text variant="secondary" size="sm">当前提供列表、下载和用量；删除尚未开放。</Text>
       {notice && <Text role="status" variant="error">{notice}</Text>}
       {exchange.fileStatusNotice && <Text role="status" variant="error">{exchange.fileStatusNotice}</Text>}
       {busy && <Text role="status">正在读取文件列表…</Text>}
