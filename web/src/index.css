@@ -70,6 +70,10 @@ body {
 .message pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 .message-notice { min-height: 1.7em; }
 
+.storage-usage { display: grid; gap: 0.7rem; padding-block: 1rem; border-block: 1px solid color-mix(in srgb, var(--color-kumo-brand) 20%, transparent); }
+.storage-values { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 0.8rem; margin: 0; }
+.storage-values div { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+.storage-values dd { margin: 0; font-variant-numeric: tabular-nums; }
 .upload-panel { display: grid; gap: 0.8rem; }
 .file-picker { display: none; }
 .upload-task { display: grid; gap: 0.35rem; padding: 0.85rem; border: 1px solid color-mix(in srgb, var(--color-kumo-brand) 25%, transparent); border-radius: 0.75rem; }
