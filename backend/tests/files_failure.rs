@@ -177,12 +177,23 @@ async fn background_cleanup_retries_after_failure_without_another_write_request(
     assert_eq!(body["code"], "cleanup_pending");
     wait_for_state(&i, &send, "cleaning").await;
     assert!(abnormal.join("blocker").exists());
+    let (status, usage) = i.request("GET", "/api/storage", Body::empty()).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        usage,
+        json!({"quota_bytes":"3", "saved_bytes":"0", "reserved_bytes":"0", "cleaning_bytes":"3", "available_bytes":"0", "over_quota":false})
+    );
     // 解除故障后不发任何写请求，等待后台重试。
     std::fs::remove_file(abnormal.join("blocker")).unwrap();
     std::fs::remove_dir(&abnormal).unwrap();
     std::fs::write(&abnormal, b"abc").unwrap();
     wait_for_state(&i, &send, "failed").await;
     assert!(!abnormal.exists());
+    let (_, usage) = i.request("GET", "/api/storage", Body::empty()).await;
+    assert_eq!(
+        usage,
+        json!({"quota_bytes":"3", "saved_bytes":"0", "reserved_bytes":"0", "cleaning_bytes":"0", "available_bytes":"3", "over_quota":false})
+    );
     assert_eq!(
         i.request("GET", &format!("/api/sends/{send}"), Body::empty())
             .await
