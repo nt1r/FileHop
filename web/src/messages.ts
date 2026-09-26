@@ -4,6 +4,13 @@ export type Message = { id: string; send_id: string; source_label: string; creat
   { kind: 'TEXT'; text: string } |
   { kind: 'FILE'; file_id: string; file_name: string; file_size: number; file_mime: string; file_state: 'available' | 'storage_error' | 'deleting' | 'deleted'; state_version: string }
 )
+export type FileStatus = Pick<Extract<Message, { kind: 'FILE' }>, 'file_id' | 'file_state' | 'state_version'>
+export function isFileStatus(value: unknown): value is FileStatus {
+  if (!value || typeof value !== 'object') return false
+  const s = value as FileStatus
+  return typeof s.file_id === 'string' && ['available', 'storage_error', 'deleting', 'deleted'].includes(s.file_state) &&
+    typeof s.state_version === 'string' && /^[1-9][0-9]*$/.test(s.state_version)
+}
 export const fileStateLabels = {
   available: '可用', storage_error: '存储异常', deleting: '删除处理中，空间尚未释放', deleted: '服务器文件已删除',
 }
@@ -42,9 +49,10 @@ class ApiError extends Error {
   retryAt: number
   constructor(status: number, code: string, message: string, retryAt = 0) { super(message); this.status = status; this.code = code; this.retryAt = retryAt }
 }
-async function request(body?: Attempt, path = '/api/messages') {
+async function request(body?: Attempt, path = '/api/messages', fileIds?: string[]) {
   const response = await fetch(path, {
-    method: body ? 'POST' : 'GET', credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15000),
+    method: body || fileIds ? 'POST' : 'GET', credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15000),
+    ...(fileIds ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file_ids: fileIds }) } : {}),
     ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ send_id: body.send_id, text: body.text, source_label: body.source_label }) } : {}),
   })
   const retry = response.headers.get('retry-after')
@@ -66,6 +74,60 @@ export function useMessages(active: boolean, onExpired: () => void) {
   const current = useRef(model)
   const [label, setLabel] = useState(savedLabel)
   const epoch = useRef(0)
+  const knownFiles = useRef(new Map<string, FileStatus>())
+  const statusReading = useRef(false)
+  const statusAgain = useRef(false)
+  const statusRetryAt = useRef(0)
+  const [fileStatusNotice, setFileStatusNotice] = useState('')
+  function projectFile<T extends Message>(message: T): T {
+    const known = message.kind === 'FILE' ? knownFiles.current.get(message.file_id) : undefined
+    return known ? { ...message, ...known } : message
+  }
+  function rememberFiles(statuses: FileStatus[]) {
+    for (const status of statuses) {
+      const previous = knownFiles.current.get(status.file_id)
+      // 同一页面共享最小版本记录；列表、历史、上传回执不能各自恢复旧的可下载状态。
+      if (!previous || BigInt(status.state_version) > BigInt(previous.state_version))
+        knownFiles.current.set(status.file_id, { file_id: status.file_id, file_state: status.file_state, state_version: status.state_version })
+    }
+    update({ ...current.current, messages: current.current.messages.map(projectFile) })
+  }
+  async function refreshFileStates() {
+    if (!enabled.current || document.visibilityState !== 'visible') return
+    if (Date.now() < statusRetryAt.current) { setFileStatusNotice('文件状态查询暂受限，请稍后刷新。'); return }
+    // 下载可能在旧查询途中才发现异常；合并刷新意图，旧查询结束后再取一次，不能漏掉这次发现。
+    if (statusReading.current) { statusAgain.current = true; return }
+    statusAgain.current = false
+    setFileStatusNotice('')
+    const version = epoch.current
+    const ids = [...knownFiles.current.keys()]
+    statusReading.current = true
+    try {
+      for (let start = 0; start < ids.length; start += 100) {
+        if (!enabled.current || version !== epoch.current || document.visibilityState !== 'visible') return
+        const batch = ids.slice(start, start + 100)
+        const value = await request(undefined, '/api/files/status-query', batch)
+        if (!enabled.current || version !== epoch.current) return
+        if (!value || typeof value !== 'object' || !('files' in value) || !Array.isArray(value.files) ||
+          !value.files.every(isFileStatus) || !('not_found' in value) || !Array.isArray(value.not_found)) throw Error()
+        const returned = [...value.files.map(s => s.file_id), ...value.not_found]
+        if (returned.length !== batch.length || new Set(returned).size !== batch.length || returned.some(id => !batch.includes(id))) throw Error()
+        rememberFiles(value.files)
+      }
+    } catch (error) {
+      if (!enabled.current || version !== epoch.current) return
+      if (error instanceof ApiError && error.status === 401 && error.code === 'session_invalid') expire.current()
+      else {
+        if (error instanceof ApiError) statusRetryAt.current = Math.max(statusRetryAt.current, error.retryAt)
+        setFileStatusNotice('文件状态校正失败，请稍后手动刷新。')
+      }
+    } finally {
+      if (version === epoch.current) {
+        statusReading.current = false
+        if (statusAgain.current) void refreshFileStates()
+      }
+    }
+  }
   const pollTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const retryAt = useRef(0)
   const failures = useRef(0)
@@ -83,6 +145,10 @@ export function useMessages(active: boolean, onExpired: () => void) {
   function update(next: Model) { current.current = next; setModel(next) }
   function suspend(clear: boolean) {
     epoch.current++
+    statusReading.current = false
+    statusAgain.current = false
+    setFileStatusNotice('')
+    if (clear) knownFiles.current.clear()
     clearTimeout(pollTimer.current)
     enabled.current = false
     // 到期只隐藏并保留内存载荷；主动退出才丢弃。旧网络回调失去代次后不得恢复内容。
@@ -91,6 +157,8 @@ export function useMessages(active: boolean, onExpired: () => void) {
       notice: current.current.attempt ? unknownNotice : current.current.notice })
   }
   function merge(messages: Message[], cursor?: string) {
+    rememberFiles(messages.filter((m): m is Extract<Message, { kind: 'FILE' }> => m.kind === 'FILE'))
+    messages = messages.map(projectFile)
     const state = current.current
     const merged = new Map(state.messages.map(m => [m.id, m]))
     for (const message of messages) {
@@ -106,7 +174,7 @@ export function useMessages(active: boolean, onExpired: () => void) {
       ...(confirmed ? { draft: '', attempt: null, notice: '发送成功' } : {}) })
   }
   async function read(older = false) {
-    if (!enabled.current || current.current.reading) return
+    if (!enabled.current || document.visibilityState !== 'visible' || current.current.reading) return
     if (Date.now() < retryAt.current) { schedule(); return }
     const boundary = older ? current.current.before : null
     if (older && (!boundary || !current.current.hasOlder)) return
@@ -242,15 +310,16 @@ export function useMessages(active: boolean, onExpired: () => void) {
   }
   function invalidateRead() {
     epoch.current++
+    statusReading.current = false
     clearTimeout(pollTimer.current)
     current.current = { ...current.current, reading: false }
   }
   useEffect(() => {
-    if (active) { failures.current = 0; nextPoll.current = 0; void read() }
+    if (active) { failures.current = 0; nextPoll.current = 0; void read().then(refreshFileStates) }
     const visible = () => {
       clearTimeout(pollTimer.current)
       // 让会话层先处理同一次前台事件中的自然到期，避免刚恢复可见就发出已失效的业务请求。
-      if (document.visibilityState === 'visible') queueMicrotask(() => { if (enabled.current) void read() })
+      if (document.visibilityState === 'visible') queueMicrotask(() => { if (enabled.current) void read().then(refreshFileStates) })
     }
     document.addEventListener('visibilitychange', visible)
     return () => { invalidateRead(); document.removeEventListener('visibilitychange', visible) }
@@ -265,6 +334,8 @@ export function useMessages(active: boolean, onExpired: () => void) {
     return () => window.removeEventListener('beforeunload', leave)
   }, [])
   return { model, label, setLabel, saveLabel, read, send, retry, query, abandon, suspend,
+    rememberFiles, projectFile, refreshFileStates, fileStatusNotice,
+    refresh: async () => { await read(); await refreshFileStates() },
     receivedFile: (message: Message) => { if (enabled.current) merge([message]) },
     hasUnsaved: () => Boolean(current.current.draft || current.current.attempt),
     draft: (value: string) => { if (!current.current.attempt) update({ ...current.current, draft: value }) } }

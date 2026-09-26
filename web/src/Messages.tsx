@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ArrowClockwiseIcon, ArrowDownIcon, ArrowUpIcon, CopyIcon, PaperPlaneTiltIcon } from '@phosphor-icons/react'
 import { Button } from '@cloudflare/kumo/components/button'
 import { Input, Textarea } from '@cloudflare/kumo/components/input'
@@ -9,6 +9,11 @@ import { type useFiles } from './files'
 
 export default function Messages({ exchange, files }: { exchange: ReturnType<typeof useMessages>; files: ReturnType<typeof useFiles> }) {
   const { model, label } = exchange
+  useEffect(() => {
+    void exchange.refreshFileStates()
+    // 重入工作区只校正已加载文件，不重新加载历史或改变同步游标。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const composing = useRef(false)
   const picker = useRef<HTMLInputElement>(null)
   const [downloadNotice, setDownloadNotice] = useState('')
@@ -57,7 +62,7 @@ export default function Messages({ exchange, files }: { exchange: ReturnType<typ
           <Text variant="secondary" size="sm">最近消息在下方，历史向上延伸。</Text>
         </div>
         <div className="stream-toolbar">
-          <Button variant="secondary" icon={<ArrowClockwiseIcon />} disabled={model.reading} onClick={() => void exchange.read()}>读取最近消息</Button>
+          <Button variant="secondary" icon={<ArrowClockwiseIcon />} disabled={model.reading} onClick={() => void exchange.refresh()}>读取最近消息</Button>
           <Button variant="ghost" icon={<ArrowUpIcon />} style={{ visibility: model.hasOlder ? 'visible' : 'hidden' }} disabled={model.reading || !model.hasOlder} onClick={() => void exchange.read(true)}>加载更早消息</Button>
           <Button variant="ghost" icon={<ArrowDownIcon />} style={{ visibility: atBottom ? 'hidden' : 'visible' }} onClick={scrollToLatest}>回到最新</Button>
         </div>
@@ -65,6 +70,7 @@ export default function Messages({ exchange, files }: { exchange: ReturnType<typ
       <div className="message-notice" aria-live="polite"><Text variant={(model.historyNotice || model.notice).includes('成功') ? 'success' : model.historyNotice || model.notice ? 'error' : 'secondary'} size="sm">{model.historyNotice || model.notice || ' '}</Text></div>
       <div className="message-notice" aria-live="polite"><Text variant={copyNotice.startsWith('复制失败') ? 'error' : copyNotice ? 'success' : 'secondary'} size="sm">{copyNotice || ' '}</Text></div>
       {downloadNotice && <Text role="status" variant="error" size="sm">{downloadNotice}</Text>}
+      {exchange.fileStatusNotice && <Text role="status" variant="error" size="sm">{exchange.fileStatusNotice}</Text>}
       <div className="messages" ref={list} tabIndex={0} aria-label="消息历史" onScroll={() => {
         const element = list.current!
         following.current = element.scrollHeight - element.scrollTop - element.clientHeight < 8

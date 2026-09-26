@@ -68,7 +68,7 @@ export default function SessionPage() {
   const deadline = useRef<number | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const exchange = useMessages(phase === 'authenticated', expire)
-  const files = useFiles(phase === 'authenticated', expire, exchange.receivedFile)
+  const files = useFiles(phase === 'authenticated', expire, exchange.receivedFile, exchange.refreshFileStates)
 
   useEffect(() => {
     const remaining = retryAt - Date.now()
@@ -262,7 +262,7 @@ export default function SessionPage() {
         <Button variant={page === 'files' ? 'primary' : 'secondary'} aria-pressed={page === 'files'} onClick={() => setPage('files')}>服务器文件</Button>
       </nav>
       {/* 草稿、发送与上传调度由会话层持有，切换视图不改变认证或任务生命周期。 */}
-      {page === 'messages' ? <Messages exchange={exchange} files={files} /> : <ServerFiles files={files} onExpired={expire} />}
+      {page === 'messages' ? <Messages exchange={exchange} files={files} /> : <ServerFiles files={files} exchange={exchange} onExpired={expire} />}
     </>}
   </section>
 }

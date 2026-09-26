@@ -306,9 +306,6 @@ pub async fn recover(
     // 数据库中已有成功记录即使实体缺失也保留历史及额度，下载再如实报告存储异常。
     for entry in std::fs::read_dir(files)? {
         let entry = entry?;
-        if !entry.file_type()?.is_file() {
-            continue;
-        }
         let filename = entry.file_name();
         let Some(raw) = filename.to_str() else {
             continue;
@@ -327,8 +324,23 @@ pub async fn recover(
                 .fetch_optional(&mut db)
                 .await?;
         if row.as_ref().is_some_and(|(_, state)| state == "success") {
-            // 已报告成功的发送必须保留实体与占用。异常临时残留不在此处推断为可删除，
-            // 否则无法在恢复阶段证明其与成功文件无关。
+            // 只利用既有启动目录遍历发现明显异常，不新增扫描或 Hash 校验。
+            // 成功发送的临时残留不代表正式实体异常，也不能擅自删除。
+            if filename.to_str() == Some(file_id.as_str()) {
+                let size: i64 = sqlx::query_scalar("SELECT size FROM file_send WHERE file_id=?")
+                    .bind(&file_id)
+                    .fetch_one(&mut db)
+                    .await?;
+                let meta = std::fs::symlink_metadata(entry.path())?;
+                if !meta.is_file() || meta.len() != size as u64 {
+                    persist_storage_error(&service, &mut db, &file_id)
+                        .await
+                        .map_err(|_| "storage anomaly could not be recorded")?;
+                }
+            }
+            continue;
+        }
+        if !entry.file_type()?.is_file() {
             continue;
         }
         if let Some((send, _)) = row {
@@ -1317,6 +1329,150 @@ pub(crate) async fn content(
     }
 }
 
+#[derive(serde::Serialize, sqlx::FromRow)]
+struct FileStatus {
+    file_id: String,
+    file_state: String,
+    state_version: String,
+}
+async fn known_status(
+    db: &mut SqliteConnection,
+    file_id: &str,
+) -> Result<Option<FileStatus>, sqlx::Error> {
+    sqlx::query_as("SELECT file_id,file_state,CAST(state_version AS TEXT) AS state_version FROM message WHERE kind='FILE' AND file_id=?")
+        .bind(file_id).fetch_optional(db).await
+}
+pub(crate) async fn status(
+    State(service): State<Arc<Service>>,
+    headers: HeaderMap,
+    Path(raw): Path<String>,
+) -> Response {
+    let (mut db, _) = match authenticate(&service, &headers).await {
+        Ok(v) => v,
+        Err(e) => return *e,
+    };
+    let Some(file_id) = id(&raw) else {
+        return error(StatusCode::NOT_FOUND, "file_not_found", "文件不可用");
+    };
+    match known_status(&mut db, &file_id).await {
+        Ok(Some(value)) => json(StatusCode::OK, value),
+        Ok(None) => error(StatusCode::NOT_FOUND, "file_not_found", "文件不可用"),
+        Err(_) => unavailable(),
+    }
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StatusQuery {
+    file_ids: Vec<String>,
+}
+pub(crate) async fn status_query(
+    State(service): State<Arc<Service>>,
+    headers: HeaderMap,
+    body: Body,
+) -> Response {
+    let (mut db, _) = match authenticate(&service, &headers).await {
+        Ok(v) => v,
+        Err(e) => return *e,
+    };
+    if !write_origin_allowed(&service, &headers) {
+        return error(StatusCode::FORBIDDEN, "origin_rejected", "请求来源不被允许");
+    }
+    if headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(';').next())
+        .is_none_or(|v| !v.trim().eq_ignore_ascii_case("application/json"))
+    {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "json_required",
+            "请求必须使用 JSON",
+        );
+    }
+    let bytes = match tokio::time::timeout(Duration::from_secs(15), to_bytes(body, 8192)).await {
+        Ok(Ok(v)) => v,
+        _ => {
+            return error(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "body_too_large",
+                "状态查询请求过大或超时",
+            );
+        }
+    };
+    let input: StatusQuery = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(_) => return error(StatusCode::BAD_REQUEST, "invalid_query", "状态查询格式无效"),
+    };
+    if input.file_ids.is_empty()
+        || input.file_ids.len() > 100
+        || input.file_ids.iter().any(|raw| id(raw).is_none())
+    {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "invalid_query",
+            "每次须查询 1–100 个有效文件标识",
+        );
+    }
+    // 只读取数据库已知状态；同一快照内去重，未知标识单独返回，不暗示实体曾被删除。
+    let mut tx = match db.begin().await {
+        Ok(v) => v,
+        Err(_) => return unavailable(),
+    };
+    let mut seen = std::collections::HashSet::new();
+    let mut files = Vec::new();
+    let mut not_found = Vec::new();
+    for raw in input.file_ids {
+        let file_id = id(&raw).unwrap();
+        if !seen.insert(file_id.clone()) {
+            continue;
+        }
+        match known_status(&mut tx, &file_id).await {
+            Ok(Some(value)) => files.push(value),
+            Ok(None) => not_found.push(file_id),
+            Err(_) => return unavailable(),
+        }
+    }
+    if tx.commit().await.is_err() {
+        return unavailable();
+    }
+    json(
+        StatusCode::OK,
+        serde_json::json!({"files":files,"not_found":not_found}),
+    )
+}
+
+// 只有可确认的单文件缺失或类型/大小异常才改变记录；权限与 I/O 故障仍是全局不可用。
+// 再核对受管位置，避免挂载消失产生的 ENOENT 被误记成文件丢失。记账和发送成功不变。
+async fn persist_storage_error(
+    service: &Service,
+    db: &mut SqliteConnection,
+    file_id: &str,
+) -> Result<(), ()> {
+    if !matches!(
+        crate::storage::inspect(&service.database, &service.files).await,
+        crate::storage::Status::Initialized
+    ) {
+        return Err(());
+    }
+    sqlx::query("UPDATE message SET file_state='storage_error',state_version=state_version+1 WHERE file_id=? AND kind='FILE' AND file_state='available'")
+        .bind(file_id).execute(db).await.map_err(|_| ())?;
+    Ok(())
+}
+async fn record_storage_error(
+    service: &Service,
+    db: &mut SqliteConnection,
+    file_id: &str,
+) -> Response {
+    if persist_storage_error(service, db, file_id).await.is_err() {
+        return unavailable();
+    }
+    error(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "storage_error",
+        "文件存储异常",
+    )
+}
+
 pub(crate) async fn download(
     State(service): State<Arc<Service>>,
     headers: HeaderMap,
@@ -1329,60 +1485,55 @@ pub(crate) async fn download(
     let Some(file_id) = id(&file_id) else {
         return error(StatusCode::NOT_FOUND, "file_not_found", "文件不可用");
     };
-    let row: Option<(String, i64)> =
-        match sqlx::query_as("SELECT name,size FROM file_send WHERE file_id=? AND state='success'")
-            .bind(&file_id)
-            .fetch_optional(&mut db)
-            .await
-        {
-            Ok(v) => v,
-            Err(_) => return unavailable(),
-        };
-    let Some((name, size)) = row else {
+    let row: Option<(String, i64, String)> = match sqlx::query_as(
+        "SELECT file_name,file_size,file_state FROM message WHERE file_id=? AND kind='FILE'",
+    )
+    .bind(&file_id)
+    .fetch_optional(&mut db)
+    .await
+    {
+        Ok(v) => v,
+        Err(_) => return unavailable(),
+    };
+    let Some((name, size, state)) = row else {
         return error(StatusCode::NOT_FOUND, "file_not_found", "文件不可用");
     };
-    if size < 0 {
+    if state != "available" {
         return error(
             StatusCode::SERVICE_UNAVAILABLE,
             "storage_error",
-            "文件记录异常",
+            "文件存储异常或不可用",
         );
     }
+    if size < 0 {
+        return record_storage_error(&service, &mut db, &file_id).await;
+    }
     let (_, path) = paths(&service, &file_id);
-    // 不允许异常符号链接把认证下载指向受管目录以外的文件。
-    if !matches!(fs::symlink_metadata(&path).await, Ok(meta) if meta.file_type().is_file()) {
-        return error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "storage_error",
-            "文件存储异常",
-        );
+    // 不打开符号链接、目录或 FIFO；尤其不能在打开命名管道时无限等待写入者。
+    match fs::symlink_metadata(&path).await {
+        Ok(meta) if meta.file_type().is_file() => (),
+        Ok(_) => return record_storage_error(&service, &mut db, &file_id).await,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return record_storage_error(&service, &mut db, &file_id).await;
+        }
+        Err(_) => return unavailable(),
     }
     let file = match OpenOptions::new()
         .read(true)
-        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32)
         .open(&path)
         .await
     {
         Ok(v) => v,
-        Err(_) => {
-            return error(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "storage_error",
-                "文件存储异常",
-            );
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return record_storage_error(&service, &mut db, &file_id).await;
         }
+        Err(_) => return unavailable(),
     };
-    if file
-        .metadata()
-        .await
-        .map_or(true, |m| !m.is_file() || m.len() != size as u64)
-        || !matches!(fs::symlink_metadata(&path).await, Ok(meta) if meta.file_type().is_file())
-    {
-        return error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "storage_error",
-            "文件存储异常",
-        );
+    match file.metadata().await {
+        Ok(meta) if meta.is_file() && meta.len() == size as u64 => (),
+        Ok(_) => return record_storage_error(&service, &mut db, &file_id).await,
+        Err(_) => return unavailable(),
     }
     // 使用 RFC 5987 编码，不让原始名称进入头部；浏览器只能作为附件保存。
     let safe: String = name
