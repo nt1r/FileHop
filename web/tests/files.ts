@@ -84,6 +84,44 @@ export async function verifyFiles(page: Page) {
   await expect(page.getByRole('article').filter({ hasText: 'retry-file.txt' })).toHaveCount(1)
   await expect(page.getByText('上传成功').last()).toBeVisible()
 
+  // 停止未提交的慢传输后，浏览器不得凭 abort 报告已停止；服务端确认后才能释放页面任务。
+  let resumeStop!: () => void
+  let uploadedStop!: () => void
+  const stopHold = new Promise<void>(resolve => { resumeStop = resolve })
+  const stopArrived = new Promise<void>(resolve => { uploadedStop = resolve })
+  await page.route('**/api/file-sends/*/attempts/*/content', async route => {
+    uploadedStop()
+    await stopHold
+    await route.continue().catch(() => {})
+  })
+  await picker.setInputFiles({ name: 'stop-file.txt', mimeType: 'text/plain', buffer: Buffer.from('stop') })
+  await stopArrived
+  await page.getByRole('button', { name: '停止上传' }).last().click()
+  await expect(page.getByText('已停止；', { exact: false })).toBeVisible()
+  resumeStop()
+  await page.unrouteAll({ behavior: 'wait' })
+  await expect(page.getByRole('article').filter({ hasText: 'stop-file.txt' })).toHaveCount(0)
+
+  // 停止响应丢失后仍显示未知；放弃只隐藏动作，不隐藏未确认名额与原因。
+  await page.route('**/api/file-sends/*/attempts/*/stop', async route => {
+    const response = await route.fetch()
+    await route.fulfill({ response, status: 502, contentType: 'text/plain', body: 'lost' })
+  }, { times: 1 })
+  await page.route('**/api/file-sends/*/attempts/*/content', route => route.abort(), { times: 1 })
+  await picker.setInputFiles({ name: 'abandoned-file.txt', mimeType: 'text/plain', buffer: Buffer.from('abandon') })
+  await expect(page.getByText('结果未确认：', { exact: false })).toBeVisible()
+  await page.getByRole('button', { name: '停止上传' }).last().click()
+  await expect(page.getByRole('button', { name: '放弃确认' }).last()).toBeVisible()
+  page.once('dialog', dialog => dialog.accept())
+  await page.getByRole('button', { name: '放弃确认' }).last().click()
+  await expect(page.getByText('仍有 1 项结果待确认：', { exact: false })).toBeVisible()
+  await expect(page.getByRole('button', { name: '选择文件' })).toBeDisabled()
+  await page.getByRole('button', { name: '查询文件结果' }).last().click()
+  // 若服务器已清理则查询会释放占用；若仍在清理则继续显示等待原因。
+  await page.unrouteAll({ behavior: 'wait' })
+  await page.reload()
+  await expect(page.getByRole('button', { name: '选择文件' })).toBeEnabled()
+
   // 退出时即使上传成功的旧回调迟到，也不能重新显示已清空的本页任务。
   let release!: () => void
   let arrived!: () => void
@@ -129,8 +167,8 @@ export async function verifyFiles(page: Page) {
   await page.getByLabel('用户名').fill('Admin')
   await page.getByLabel('密码', { exact: true }).fill(' synthetic password ')
   await page.getByRole('button', { name: '登录', exact: true }).click()
-  await expect(page.getByText('结果未确认：', { exact: false })).toBeVisible()
-  await expect(page.getByRole('button', { name: '选择文件' })).toBeDisabled()
+  await expect(page.getByText('上传成功').last()).toBeVisible()
+  await expect(page.getByRole('button', { name: '选择文件' })).toBeEnabled()
   page.once('dialog', dialog => dialog.accept())
   await page.reload()
   await expect(page.getByRole('region', { name: '消息流' })).toBeVisible()

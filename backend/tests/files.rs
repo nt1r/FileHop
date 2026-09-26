@@ -85,6 +85,335 @@ impl Fixture {
     }
 }
 #[tokio::test]
+async fn stop_before_prepare_is_durable_and_successor_can_register_missing_metadata() {
+    let f = Fixture::new().await;
+    let send = uuid::Uuid::new_v4().to_string();
+    let first = uuid::Uuid::new_v4().to_string();
+    let next = uuid::Uuid::new_v4().to_string();
+    let stop = format!("/api/file-sends/{send}/attempts/{first}/stop");
+    let input = json!({"send_id":send,"attempt_id":first,"name":"late","size":3,"mime":"","source_label":"Web"});
+    assert_eq!(
+        f.json("POST", &stop, Value::Null).await.1["state"],
+        "stopped"
+    );
+    assert_eq!(
+        f.json("POST", &stop, Value::Null).await.1["state"],
+        "stopped"
+    );
+    // 纯停止标记尚无元数据；首次准备才决定发送身份的固定文件信息。
+    assert_eq!(
+        f.json("POST", "/api/file-sends", input.clone()).await.1["state"],
+        "stopped"
+    );
+    let path = format!("/api/file-sends/{send}/attempts");
+    let retry = json!({"attempt_id":next,"previous_attempt_id":first,"name":"late","size":3,"mime":"","source_label":"Web"});
+    assert_eq!(
+        f.json("POST", &path, retry.clone()).await.1["state"],
+        "prepared"
+    );
+    assert_eq!(f.json("POST", &path, retry).await.1["attempt_id"], next);
+    assert_eq!(f.json("POST", &path, json!({"attempt_id":next,"previous_attempt_id":first,"name":"other","size":3,"mime":"","source_label":"Web"})).await.1["code"], "attempt_conflict");
+    assert_eq!(f.json("POST", &path, json!({"attempt_id":uuid::Uuid::new_v4().to_string(),"previous_attempt_id":first,"name":"late","size":3,"mime":"","source_label":"Web"})).await.1["code"], "attempt_conflict");
+    assert_eq!(f.json("POST", "/api/file-sends", json!({"send_id":send,"attempt_id":first,"name":"wrong","size":3,"mime":"","source_label":"Web"})).await.1["code"], "send_conflict");
+    assert_eq!(
+        f.json("POST", &stop, Value::Null).await.1["state"],
+        "stopped"
+    );
+    assert_eq!(
+        f.json("POST", "/api/file-sends", input).await.1["state"],
+        "stopped"
+    );
+    assert_eq!(
+        f.request(
+            "PUT",
+            &format!("/api/file-sends/{send}/attempts/{next}/content"),
+            Body::from("abc")
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        f.json("GET", "/api/messages", Value::Null).await.1["messages"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn successor_stop_before_prepare_is_bound_to_one_predecessor() {
+    let f = Fixture::new().await;
+    let send = uuid::Uuid::new_v4().to_string();
+    let first = uuid::Uuid::new_v4().to_string();
+    let next = uuid::Uuid::new_v4().to_string();
+    let sibling = uuid::Uuid::new_v4().to_string();
+    let meta = json!({"send_id":send,"attempt_id":first,"name":"no bytes","size":3,"mime":"","source_label":"Web"});
+    assert_eq!(
+        f.json("POST", "/api/file-sends", meta).await.1["state"],
+        "prepared"
+    );
+    assert_eq!(
+        f.json(
+            "POST",
+            &format!("/api/file-sends/{send}/attempts/{first}/stop"),
+            Value::Null
+        )
+        .await
+        .1["state"],
+        "stopped"
+    );
+    let next_path = format!("/api/file-sends/{send}/attempts");
+    assert_eq!(
+        f.json(
+            "POST",
+            &format!("/api/file-sends/{send}/attempts/{next}/stop"),
+            Value::Null
+        )
+        .await
+        .1["state"],
+        "stopped"
+    );
+    assert_eq!(
+        f.json(
+            "POST",
+            &next_path,
+            json!({"attempt_id":next,"previous_attempt_id":first})
+        )
+        .await
+        .1["state"],
+        "stopped"
+    );
+    assert_eq!(
+        f.json(
+            "POST",
+            &next_path,
+            json!({"attempt_id":sibling,"previous_attempt_id":first})
+        )
+        .await
+        .1["code"],
+        "attempt_conflict"
+    );
+    assert_ne!(
+        f.request(
+            "PUT",
+            &format!("/api/file-sends/{send}/attempts/{next}/content"),
+            Body::from("abc")
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn successor_stop_arriving_before_first_prepare_remains_stopped() {
+    let f = Fixture::new().await;
+    let send = uuid::Uuid::new_v4().to_string();
+    let first = uuid::Uuid::new_v4().to_string();
+    let next = uuid::Uuid::new_v4().to_string();
+    let stop = format!("/api/file-sends/{send}/attempts/{next}/stop");
+    assert_eq!(
+        f.json("POST", &stop, Value::Null).await.1["state"],
+        "stopped"
+    );
+    let first_meta = json!({"send_id":send,"attempt_id":first,"name":"first","size":1,"mime":"","source_label":"Web"});
+    assert_eq!(
+        f.json("POST", "/api/file-sends", first_meta).await.1["state"],
+        "prepared"
+    );
+    assert_eq!(
+        f.json(
+            "POST",
+            &format!("/api/file-sends/{send}/attempts/{first}/stop"),
+            Value::Null
+        )
+        .await
+        .1["state"],
+        "stopped"
+    );
+    assert_eq!(
+        f.json(
+            "POST",
+            &format!("/api/file-sends/{send}/attempts"),
+            json!({"attempt_id":next,"previous_attempt_id":first})
+        )
+        .await
+        .1["state"],
+        "stopped"
+    );
+    assert_ne!(
+        f.request(
+            "PUT",
+            &format!("/api/file-sends/{send}/attempts/{next}/content"),
+            Body::from("a")
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn stop_marker_survives_restart_without_inventing_file_metadata() {
+    let f = Fixture::new().await;
+    let send = uuid::Uuid::new_v4().to_string();
+    let first = uuid::Uuid::new_v4().to_string();
+    let stop = format!("/api/file-sends/{send}/attempts/{first}/stop");
+    assert_eq!(
+        f.json("POST", &stop, Value::Null).await.1["state"],
+        "stopped"
+    );
+    backend::files_recover(
+        &f._root.path().join("database"),
+        &f._root.path().join("files"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        f.json("GET", &format!("/api/file-sends/{send}"), Value::Null)
+            .await
+            .1["attempt_id"],
+        first
+    );
+    assert_eq!(f.json("POST", "/api/file-sends", json!({"send_id":send,"attempt_id":first,"name":"after restart","size":0,"mime":"","source_label":"Web"})).await.1["state"], "stopped");
+    assert_eq!(
+        f.json("GET", &format!("/api/sends/{send}"), Value::Null)
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn stop_during_a_stream_forbids_commit_and_keeps_quota_until_writer_exits() {
+    let root = tempfile::tempdir().unwrap();
+    let database = root.path().join("database");
+    let files = root.path().join("files");
+    std::fs::create_dir(&database).unwrap();
+    std::fs::create_dir(&files).unwrap();
+    backend::storage::initialize(&database, &files, "Admin", " synthetic password ")
+        .await
+        .unwrap();
+    let mut config = backend::session::Config::default();
+    config.transfer.quota = 3;
+    config.transfer.disk_reserve = 0;
+    let f = Fixture::with_app(root, backend::app_with_config(database, files, config)).await;
+    let send = uuid::Uuid::new_v4().to_string();
+    let attempt = uuid::Uuid::new_v4().to_string();
+    let input = json!({"send_id":send,"attempt_id":attempt,"name":"stream","size":3,"mime":"","source_label":"Web"});
+    assert_eq!(
+        f.json("POST", "/api/file-sends", input).await.0,
+        StatusCode::OK
+    );
+    let (sender, receiver) = tokio::sync::mpsc::channel::<Result<Vec<u8>, std::io::Error>>(2);
+    sender.send(Ok(vec![b'a'])).await.unwrap();
+    let stream = futures_util::stream::unfold(receiver, |mut receiver| async move {
+        receiver.recv().await.map(|chunk| (chunk, receiver))
+    });
+    let path = format!("/api/file-sends/{send}/attempts/{attempt}/content");
+    let app = f.app.clone();
+    let cookie = f.cookie.clone();
+    let upload = tokio::spawn(async move {
+        app.oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(path)
+                .header("cookie", cookie)
+                .header("origin", "https://filehop.invalid")
+                .body(Body::from_stream(stream))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+    });
+    let ready = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let (_, state) = f
+                .json("GET", &format!("/api/file-sends/{send}"), Value::Null)
+                .await;
+            if state["state"] == "writing" {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    ready.unwrap();
+    let stop = format!("/api/file-sends/{send}/attempts/{attempt}/stop");
+    assert_eq!(
+        f.json("POST", &stop, Value::Null).await.1["state"],
+        "stopped"
+    );
+    let other = json!({"send_id":uuid::Uuid::new_v4().to_string(),"attempt_id":uuid::Uuid::new_v4().to_string(),"name":"other","size":3,"mime":"","source_label":"Web"});
+    assert_eq!(
+        f.json("POST", "/api/file-sends", other.clone()).await.1["code"],
+        "quota_exceeded"
+    );
+    sender.send(Ok(vec![b'b', b'c'])).await.unwrap();
+    drop(sender);
+    assert_ne!(upload.await.unwrap().status(), StatusCode::OK);
+    assert_eq!(
+        f.json("GET", &format!("/api/sends/{send}"), Value::Null)
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        f.json("POST", "/api/file-sends", other).await.1["state"],
+        "prepared"
+    );
+    assert_eq!(
+        f.json("GET", &format!("/api/file-sends/{send}"), Value::Null)
+            .await
+            .1["state"],
+        "stopped"
+    );
+}
+
+#[tokio::test]
+async fn stop_after_commit_returns_the_original_message_and_is_origin_protected() {
+    let f = Fixture::new().await;
+    let send = uuid::Uuid::new_v4().to_string();
+    let attempt = uuid::Uuid::new_v4().to_string();
+    let input = json!({"send_id":send,"attempt_id":attempt,"name":"kept","size":0,"mime":"","source_label":"Web"});
+    let stop = format!("/api/file-sends/{send}/attempts/{attempt}/stop");
+    let denied = f
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&stop)
+                .header("cookie", &f.cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        f.json("POST", "/api/file-sends", input).await.0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        f.request(
+            "PUT",
+            &format!("/api/file-sends/{send}/attempts/{attempt}/content"),
+            Body::empty()
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
+    let (_, original) = f
+        .json("GET", &format!("/api/sends/{send}"), Value::Null)
+        .await;
+    assert_eq!(f.json("POST", &stop, Value::Null).await.1, original);
+}
+
+#[tokio::test]
 async fn query_and_successor_are_idempotent_and_old_writer_cannot_commit() {
     let f = Fixture::new().await;
     let send = uuid::Uuid::new_v4().to_string();

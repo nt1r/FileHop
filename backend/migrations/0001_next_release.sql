@@ -25,6 +25,17 @@ CREATE TABLE account (
     password_hash TEXT NOT NULL
 );
 -- 文件发送与文本消息共享 send_id 身份空间；提交前的尝试另行跟踪并预留额度。
+-- 停止可能早于准备到达：只登记身份和前驱关系，不凭空确定文件元数据或占用额度。
+CREATE TABLE file_attempt_marker (
+    attempt_id TEXT PRIMARY KEY,
+    send_id TEXT NOT NULL,
+    previous_attempt_id TEXT,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    is_first INTEGER NOT NULL DEFAULT 0,
+    stopped INTEGER NOT NULL DEFAULT 1,
+    UNIQUE (send_id, previous_attempt_id)
+);
+CREATE INDEX file_attempt_marker_send ON file_attempt_marker(send_id);
 CREATE TABLE file_send (
     send_id TEXT PRIMARY KEY,
     attempt_id TEXT NOT NULL,
@@ -33,13 +44,13 @@ CREATE TABLE file_send (
     size INTEGER NOT NULL CHECK (size >= 0),
     mime TEXT NOT NULL,
     source_label TEXT NOT NULL,
-    state TEXT NOT NULL CHECK (state IN ('prepared', 'writing', 'cleaning', 'failed', 'success')),
+    state TEXT NOT NULL CHECK (state IN ('prepared', 'writing', 'cleaning', 'failed', 'stopped', 'success')),
     reserved INTEGER NOT NULL CHECK (reserved >= 0),
     prepared_at INTEGER NOT NULL
 );
 CREATE TABLE file_attempt (
     attempt_id TEXT PRIMARY KEY,
     send_id TEXT NOT NULL REFERENCES file_send(send_id),
-    state TEXT NOT NULL CHECK (state IN ('prepared', 'writing', 'cleaning', 'failed', 'success'))
+    state TEXT NOT NULL CHECK (state IN ('prepared', 'writing', 'cleaning', 'failed', 'stopped', 'success'))
 );
 CREATE INDEX file_send_state ON file_send(state);
