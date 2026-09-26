@@ -85,6 +85,203 @@ impl Fixture {
     }
 }
 #[tokio::test]
+async fn deletion_preserves_history_and_send_identity_until_physical_cleanup() {
+    let f = Fixture::new().await;
+    let send = uuid::Uuid::new_v4().to_string();
+    let attempt = uuid::Uuid::new_v4().to_string();
+    let input = json!({"send_id":send,"attempt_id":attempt,"name":"delete.txt","size":3,"mime":"","source_label":"Desk"});
+    assert_eq!(
+        f.json("POST", "/api/file-sends", input.clone()).await.0,
+        StatusCode::OK
+    );
+    let r = f
+        .request(
+            "PUT",
+            &format!("/api/file-sends/{send}/attempts/{attempt}/content"),
+            Body::from("abc"),
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::OK);
+    let original: Value =
+        serde_json::from_slice(&to_bytes(r.into_body(), 4096).await.unwrap()).unwrap();
+    let file = original["file_id"].as_str().unwrap();
+    let path = format!("/api/files/{file}");
+    let (code, accepted) = f.json("DELETE", &path, Value::Null).await;
+    assert_eq!(code, StatusCode::ACCEPTED);
+    assert_eq!(
+        accepted,
+        json!({"file_id":file,"file_state":"deleting","state_version":"2"})
+    );
+    assert_eq!(f.json("DELETE", &path, Value::Null).await.1, accepted);
+    assert_ne!(
+        f.request("GET", &path, Body::empty()).await.status(),
+        StatusCode::OK
+    );
+    let usage = f.json("GET", "/api/storage", Value::Null).await.1;
+    assert_eq!(usage["saved_bytes"], "0");
+    assert_eq!(usage["cleaning_bytes"], "3");
+    tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        loop {
+            let state = f
+                .json("GET", &format!("{path}/status"), Value::Null)
+                .await
+                .1;
+            if state["file_state"] == "deleted" {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(!f._root.path().join("files").join(file).exists());
+    assert_eq!(
+        f.json("DELETE", &path, Value::Null).await,
+        (
+            StatusCode::OK,
+            json!({"file_id":file,"file_state":"deleted","state_version":"3"})
+        )
+    );
+    let mut expected = original;
+    expected["file_state"] = json!("deleted");
+    expected["state_version"] = json!("3");
+    assert_eq!(f.json("POST", "/api/file-sends", input).await.1, expected);
+    assert_eq!(
+        f.json("GET", &format!("/api/sends/{send}"), Value::Null)
+            .await
+            .1,
+        expected
+    );
+    assert_eq!(
+        f.json("GET", "/api/messages", Value::Null).await.1["messages"][0],
+        expected
+    );
+    assert_eq!(
+        f.json("GET", "/api/files", Value::Null).await.1["files"],
+        json!([])
+    );
+    assert_eq!(
+        f.json("GET", "/api/storage", Value::Null).await.1["cleaning_bytes"],
+        "0"
+    );
+}
+
+#[tokio::test]
+async fn active_read_rejects_delete_and_cancellation_releases_it_without_queued_deletion() {
+    let f = Fixture::new().await;
+    let send = uuid::Uuid::new_v4();
+    let attempt = uuid::Uuid::new_v4();
+    let input = json!({"send_id":send.to_string(),"attempt_id":attempt.to_string(),"name":"reading","size":1048576,"mime":"","source_label":"Desk"});
+    assert_eq!(
+        f.json("POST", "/api/file-sends", input).await.0,
+        StatusCode::OK
+    );
+    let r = f
+        .request(
+            "PUT",
+            &format!("/api/file-sends/{send}/attempts/{attempt}/content"),
+            Body::from(vec![42; 1048576]),
+        )
+        .await;
+    let original: Value =
+        serde_json::from_slice(&to_bytes(r.into_body(), 4096).await.unwrap()).unwrap();
+    let file = original["file_id"].as_str().unwrap();
+    let path = format!("/api/files/{file}");
+    // 不消费有界响应，保证服务器仍持有真实文件读取句柄。
+    let download = f.request("GET", &path, Body::empty()).await;
+    assert_eq!(download.status(), StatusCode::OK);
+    let (code, conflict) = f.json("DELETE", &path, Value::Null).await;
+    assert_eq!(code, StatusCode::CONFLICT);
+    assert_eq!(conflict["code"], "FILE_IN_USE");
+    assert_eq!(
+        f.json("GET", &format!("{path}/status"), Value::Null)
+            .await
+            .1["state_version"],
+        "1"
+    );
+    drop(download);
+    // 只等待任务释放资源，不通过自动重发 DELETE 把冲突变成排队删除。
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let r = f.request("GET", &path, Body::empty()).await;
+            let data = to_bytes(r.into_body(), 1048576).await.unwrap();
+            assert_eq!(data.len(), 1048576);
+            if std::fs::read_dir("/proc/self/fd")
+                .unwrap()
+                .filter_map(Result::ok)
+                .filter_map(|e| std::fs::read_link(e.path()).ok())
+                .all(|p| p != f._root.path().join("files").join(file))
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        f.json("GET", &format!("{path}/status"), Value::Null)
+            .await
+            .1["file_state"],
+        "available"
+    );
+    assert_eq!(
+        f.request("HEAD", &path, Body::empty()).await.status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        f.json("DELETE", &path, Value::Null).await.0,
+        StatusCode::ACCEPTED
+    );
+}
+
+#[tokio::test]
+async fn delete_requires_cookie_origin_and_a_managed_identifier() {
+    let f = Fixture::new().await;
+    let path = format!("/api/files/{}", uuid::Uuid::new_v4());
+    for (cookie, origin, expected) in [
+        (
+            "",
+            Some("https://filehop.invalid"),
+            StatusCode::UNAUTHORIZED,
+        ),
+        (f.cookie.as_str(), None, StatusCode::FORBIDDEN),
+        (
+            f.cookie.as_str(),
+            Some("https://other.invalid"),
+            StatusCode::FORBIDDEN,
+        ),
+    ] {
+        let mut request = Request::builder()
+            .method("DELETE")
+            .uri(&path)
+            .header("cookie", cookie);
+        if let Some(origin) = origin {
+            request = request.header("origin", origin);
+        }
+        let response = f
+            .app
+            .clone()
+            .oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected);
+        assert_eq!(response.headers()["cache-control"], "no-store");
+    }
+    for path in [
+        &path,
+        "/api/files/not-a-uuid",
+        "/api/files/%2e%2e%2fstorage-id",
+    ] {
+        assert_eq!(
+            f.json("DELETE", path, Value::Null).await.0,
+            StatusCode::NOT_FOUND
+        );
+    }
+    assert!(f._root.path().join("files/storage-id").is_file());
+}
+
+#[tokio::test]
 async fn missing_committed_file_is_versioned_without_rewriting_success_or_releasing_quota() {
     let f = Fixture::new().await;
     let send = uuid::Uuid::new_v4().to_string();
@@ -1561,6 +1758,10 @@ async fn unread_download_times_out_and_releases_its_concurrency_slot() {
         loop {
             let response = f.request("GET", &path, Body::empty()).await;
             if response.status() == StatusCode::OK {
+                assert_eq!(
+                    to_bytes(response.into_body(), 262144).await.unwrap().len(),
+                    262144
+                );
                 break true;
             }
             assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
@@ -1570,6 +1771,11 @@ async fn unread_download_times_out_and_releases_its_concurrency_slot() {
     .await
     .unwrap();
     assert!(released);
+    // 原响应尚未销毁，超时已关闭真实句柄，因此不再阻止删除。
+    assert_eq!(
+        f.json("DELETE", &path, Value::Null).await.0,
+        StatusCode::ACCEPTED
+    );
     drop(unread);
 }
 

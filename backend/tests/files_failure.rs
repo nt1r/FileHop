@@ -89,6 +89,106 @@ impl Instance {
         (status, body)
     }
 }
+#[tokio::test]
+async fn failed_deletion_keeps_quota_until_background_retry_cleans_the_entity() {
+    let i = Instance::new().await;
+    let send = uuid::Uuid::new_v4();
+    let attempt = uuid::Uuid::new_v4();
+    let input = json!({"send_id":send.to_string(),"attempt_id":attempt.to_string(),"name":"delete","size":3,"mime":"","source_label":"Web"});
+    assert_eq!(
+        i.request("POST", "/api/file-sends", Body::from(input.to_string()))
+            .await
+            .0,
+        StatusCode::OK
+    );
+    let (code, message) = i
+        .request(
+            "PUT",
+            &format!("/api/file-sends/{send}/attempts/{attempt}/content"),
+            Body::from("abc"),
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK);
+    let file = message["file_id"].as_str().unwrap();
+    let path = format!("/api/files/{file}");
+    // 异常目录不能被递归清理；移除障碍仅作用于本用例创建的临时路径。
+    std::fs::remove_file(i.files.join(file)).unwrap();
+    std::fs::create_dir(i.files.join(file)).unwrap();
+    assert_eq!(
+        i.request("DELETE", &path, Body::empty()).await.0,
+        StatusCode::ACCEPTED
+    );
+    let next = json!({"send_id":uuid::Uuid::new_v4().to_string(),"attempt_id":uuid::Uuid::new_v4().to_string(),"name":"next","size":3,"mime":"","source_label":"Web"});
+    assert_ne!(
+        i.request("POST", "/api/file-sends", Body::from(next.to_string()))
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        i.request("GET", &format!("{path}/status"), Body::empty())
+            .await
+            .1["file_state"],
+        "deleting"
+    );
+    // 无新写请求时也应继续重试；挂载身份异常不能当作实体缺失释放额度。
+    std::fs::remove_dir(i.files.join(file)).unwrap();
+    let identity = std::fs::read(i.files.join("storage-id")).unwrap();
+    std::fs::write(i.files.join("storage-id"), uuid::Uuid::new_v4().to_string()).unwrap();
+    // 恢复入口也必须拒绝错误身份，不能凭实体缺失释放额度。
+    assert!(backend::files_recover(&i.database, &i.files).await.is_err());
+    assert_eq!(
+        i.request("GET", &format!("{path}/status"), Body::empty())
+            .await
+            .0,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    std::fs::write(i.files.join("storage-id"), identity).unwrap();
+    assert_eq!(
+        i.request("GET", &format!("{path}/status"), Body::empty())
+            .await
+            .1["file_state"],
+        "deleting"
+    );
+    tokio::time::timeout(std::time::Duration::from_secs(25), async {
+        loop {
+            let state = i
+                .request("GET", &format!("{path}/status"), Body::empty())
+                .await
+                .1;
+            if state["file_state"] == "deleted" {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let competing = json!({"send_id":uuid::Uuid::new_v4().to_string(),"attempt_id":uuid::Uuid::new_v4().to_string(),"name":"competing","size":3,"mime":"","source_label":"Web"});
+    let (one, two) = tokio::join!(
+        i.request("POST", "/api/file-sends", Body::from(next.to_string())),
+        i.request("POST", "/api/file-sends", Body::from(competing.to_string()))
+    );
+    assert_eq!(
+        [one.0, two.0]
+            .iter()
+            .filter(|code| **code == StatusCode::OK)
+            .count(),
+        1
+    );
+    assert_eq!(
+        i.request("DELETE", &path, Body::empty()).await.0,
+        StatusCode::OK
+    );
+    let extra = json!({"send_id":uuid::Uuid::new_v4().to_string(),"attempt_id":uuid::Uuid::new_v4().to_string(),"name":"extra","size":1,"mime":"","source_label":"Web"});
+    assert_ne!(
+        i.request("POST", "/api/file-sends", Body::from(extra.to_string()))
+            .await
+            .0,
+        StatusCode::OK
+    );
+}
+
 // 只轮询只读状态接口；不能用准备/后继请求顺带触发协调，冒充后台清理证据。
 async fn wait_for_state(i: &Instance, send: &str, expected: &str) {
     tokio::time::timeout(std::time::Duration::from_secs(20), async {
