@@ -5,9 +5,9 @@ See the [development guide](docs/development.md) for toolchains, build/test comm
 - `dev` is the repository's default branch. For a task PR, use a working branch based on `dev` and verify the PR targets `dev`. A worktree created with its own task branch already satisfies this workflow: commit and push that branch instead of creating another at submission time. Create a branch only when no suitable task branch exists (for example, when working on `dev`).
 - Open release pull requests from this repository's `dev` branch into `main`.
 - Direct pushes, force pushes, and deletion of `main` or `dev` are blocked.
-- Both branches require the `main-source-policy` check and resolved review conversations. No approving review is required while this is a solo project.
+- Both branches require the `main-source-policy` check and resolved review conversations, but do not require PR branches to be up to date with the target branch before merging. Merge conflicts still need to be resolved. No approving review is required while this is a solo project.
 - PRs into `dev` allow only **Squash and merge**; keep each task as one commit.
-- PRs into `main` allow only **Create a merge commit** for `dev` → `main`; preserve the ancestry of these long-lived branches. Bring `main` back into a working branch when necessary to satisfy up-to-date checks.
+- PRs into `main` allow only **Create a merge commit** for `dev` → `main`; preserve the ancestry of these long-lived branches.
 - The PR template lives in [`.github/pull_request_template.md`](.github/pull_request_template.md). Follow [the quality principles](docs/testing.md) and the relevant [Spec](docs/roadmap.md).
 
 ## Public content checklist
