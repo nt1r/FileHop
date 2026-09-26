@@ -1,3 +1,4 @@
+// Synthetic source-only change for isolated CI cache validation.
 use clap::{Parser, Subcommand};
 use std::{net::SocketAddr, path::PathBuf};
 use tokio::signal;
