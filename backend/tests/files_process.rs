@@ -5,6 +5,9 @@ use std::{
     time::Duration,
 };
 
+#[path = "support/resource_probe.rs"]
+mod resource_probe;
+
 struct Server(Child);
 impl Drop for Server {
     fn drop(&mut self) {

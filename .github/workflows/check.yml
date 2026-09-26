@@ -90,6 +90,7 @@ jobs:
           cargo fmt --manifest-path backend/Cargo.toml --check
           cargo clippy --manifest-path backend/Cargo.toml --locked --all-targets -- -D warnings
           cargo test --manifest-path backend/Cargo.toml --locked
+          cargo test --manifest-path backend/Cargo.toml --locked --test files_process bounded_memory -- --ignored --nocapture
           cargo build --manifest-path backend/Cargo.toml --locked
       - name: Shell syntax
         run: |
