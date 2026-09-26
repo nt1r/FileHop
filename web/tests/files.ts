@@ -232,11 +232,22 @@ export async function verifyFiles(page: Page) {
   let arrived!: () => void
   const held = new Promise<void>(resolve => { release = resolve })
   const received = new Promise<void>(resolve => { arrived = resolve })
+  let lateCount = 0
+  let completedCount = 0
+  let completed!: () => void
+  const responsesCompleted = new Promise<void>(resolve => { completed = resolve })
+  let firstResponsesDone!: () => void
+  const firstResponses = new Promise<void>(resolve => { firstResponsesDone = resolve })
   await page.route('**/api/file-sends/*/attempts/*/content', async route => {
     const response = await route.fetch()
-    arrived()
+    const index = ++lateCount
+    if (index === 3) arrived()
     await held
+    // 明确制造错开的回调完成顺序，不靠 sleep 或碰巧同时返回来掩盖清理竞争。
+    if (index === 3) await firstResponses
     await route.fulfill({ response })
+    if (++completedCount === 2) firstResponsesDone()
+    if (completedCount === 3) completed()
   })
   await picker.setInputFiles(['late-file.txt', 'late-second.txt', 'late-third.txt', 'late-waiting.txt'].map(name => ({ name, mimeType: 'text/plain', buffer: Buffer.from('late') })))
   await received
@@ -245,6 +256,9 @@ export async function verifyFiles(page: Page) {
   await page.getByRole('button', { name: '退出登录' }).click()
   await expect(page.getByRole('region', { name: '消息流' })).toHaveCount(0)
   release()
+  // 并发 handler 未完成时 unrouteAll(wait) 仍可能触发拦截更新，提前放行其余路由。
+  // 先等待每个 fulfill 真正完成；不能忽略异常，否则会丢掉迟到响应的验证。
+  await responsesCompleted
   await page.unrouteAll({ behavior: 'wait' })
   await expect(page.getByText(/late-(file|second|third|waiting)\.txt/)).toHaveCount(0)
   await page.getByLabel('用户名').fill('Admin')
@@ -255,6 +269,9 @@ export async function verifyFiles(page: Page) {
 
   let releaseExpiry!: () => void
   let expiryCount = 0
+  let expiryCompletedCount = 0
+  let completedExpiry!: () => void
+  const expiryResponsesCompleted = new Promise<void>(resolve => { completedExpiry = resolve })
   let arrivedExpiry!: () => void
   const expiryHold = new Promise<void>(resolve => { releaseExpiry = resolve })
   const expiryReceived = new Promise<void>(resolve => { arrivedExpiry = resolve })
@@ -263,6 +280,7 @@ export async function verifyFiles(page: Page) {
     if (++expiryCount === 3) arrivedExpiry()
     await expiryHold
     await route.fulfill({ response })
+    if (++expiryCompletedCount === 3) completedExpiry()
   })
   await expect(page.getByRole('button', { name: '选择文件' })).toBeEnabled()
   await picker.setInputFiles(['expired-file.txt', 'expired-second.txt', 'expired-third.txt', 'expired-waiting.txt'].map(name => ({ name, mimeType: 'text/plain', buffer: Buffer.from('expired') })))
@@ -271,6 +289,7 @@ export async function verifyFiles(page: Page) {
   await page.clock.fastForward(43_200_000)
   await expect(page.getByRole('region', { name: '消息流' })).toHaveCount(0)
   releaseExpiry()
+  await expiryResponsesCompleted
   await page.unrouteAll({ behavior: 'wait' })
   await expect(page.getByText(/expired-(file|second|third|waiting)\.txt/)).toHaveCount(0)
   await page.getByLabel('用户名').fill('Admin')
