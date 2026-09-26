@@ -159,6 +159,11 @@ fn router_inner(database: PathBuf, files: PathBuf, config: Config, recovered: bo
         )
         .route("/api/files", get(crate::messages::files))
         .route("/api/files/{file_id}", get(crate::files::download))
+        .route("/api/files/{file_id}/status", get(crate::files::status))
+        .route(
+            "/api/files/status-query",
+            axum::routing::post(crate::files::status_query),
+        )
         .route(
             "/api/messages",
             get(crate::messages::recent).post(crate::messages::send),

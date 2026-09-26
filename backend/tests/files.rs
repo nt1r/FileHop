@@ -85,6 +85,268 @@ impl Fixture {
     }
 }
 #[tokio::test]
+async fn missing_committed_file_is_versioned_without_rewriting_success_or_releasing_quota() {
+    let f = Fixture::new().await;
+    let send = uuid::Uuid::new_v4().to_string();
+    let attempt = uuid::Uuid::new_v4().to_string();
+    let input = json!({"send_id":send,"attempt_id":attempt,"name":"missing.txt","size":3,"mime":"text/plain","source_label":"Desk"});
+    assert_eq!(
+        f.json("POST", "/api/file-sends", input.clone()).await.0,
+        StatusCode::OK
+    );
+    let response = f
+        .request(
+            "PUT",
+            &format!("/api/file-sends/{send}/attempts/{attempt}/content"),
+            Body::from("abc"),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let original: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 4096).await.unwrap()).unwrap();
+    let file = original["file_id"].as_str().unwrap();
+    std::fs::remove_file(f._root.path().join("files").join(file)).unwrap();
+    // 普通列表只报告已知状态；外部移除直到实际下载打开才被发现。
+    assert_eq!(
+        f.json("GET", "/api/files", Value::Null).await.1["files"][0],
+        original
+    );
+    let download = format!("/api/files/{file}");
+    assert_eq!(
+        f.json("GET", &download, Value::Null).await.1["code"],
+        "storage_error"
+    );
+    let mut expected = original.clone();
+    expected["file_state"] = json!("storage_error");
+    expected["state_version"] = json!("2");
+    assert_eq!(
+        f.json("GET", &format!("/api/sends/{send}"), Value::Null)
+            .await
+            .1,
+        expected
+    );
+    // 重复检测不会不断增加版本；文件恢复也不自动修复已知异常或重新上传。
+    std::fs::write(f._root.path().join("files").join(file), "abc").unwrap();
+    assert_eq!(
+        f.json("GET", &download, Value::Null).await.1["code"],
+        "storage_error"
+    );
+    assert_eq!(
+        f.json("GET", &format!("/api/file-sends/{send}"), Value::Null)
+            .await
+            .1["message"],
+        expected
+    );
+    assert_eq!(f.json("POST", "/api/file-sends", input).await.1, expected);
+    assert_eq!(
+        f.json("GET", "/api/messages", Value::Null).await.1["messages"],
+        json!([expected])
+    );
+    // 配额调至恰好等于原文件大小；异常不能偷偷释放已报告成功的占用。
+    let config = backend::session::Config {
+        transfer: backend::TransferConfig {
+            quota: 3,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let app = backend::app_with_config(
+        f._root.path().join("database"),
+        f._root.path().join("files"),
+        config,
+    );
+    let f = Fixture::with_app(f._root, app).await;
+    assert_eq!(f.json("POST", "/api/file-sends", json!({"send_id":uuid::Uuid::new_v4().to_string(),"attempt_id":uuid::Uuid::new_v4().to_string(),"name":"over","size":1,"mime":"","source_label":"Desk"})).await.1["code"], "quota_exceeded");
+    assert_eq!(
+        f.json("GET", &format!("/api/sends/{send}"), Value::Null)
+            .await
+            .1,
+        expected
+    );
+}
+
+#[tokio::test]
+async fn global_storage_faults_and_file_permissions_do_not_mark_files_missing() {
+    use std::os::unix::fs::PermissionsExt;
+    let f = Fixture::new().await;
+    let send = uuid::Uuid::new_v4().to_string();
+    let attempt = uuid::Uuid::new_v4().to_string();
+    f.json("POST", "/api/file-sends", json!({"send_id":send,"attempt_id":attempt,"name":"healthy.txt","size":3,"mime":"","source_label":"Desk"})).await;
+    let r = f
+        .request(
+            "PUT",
+            &format!("/api/file-sends/{send}/attempts/{attempt}/content"),
+            Body::from("abc"),
+        )
+        .await;
+    let original: Value =
+        serde_json::from_slice(&to_bytes(r.into_body(), 4096).await.unwrap()).unwrap();
+    let file = original["file_id"].as_str().unwrap();
+    let files = f._root.path().join("files");
+    let entity = files.join(file);
+    let path = format!("/api/files/{file}");
+    let identity = std::fs::read(files.join("storage-id")).unwrap();
+    for fault in ["identity", "directory", "permission"] {
+        match fault {
+            "identity" => {
+                std::fs::write(files.join("storage-id"), uuid::Uuid::new_v4().to_string()).unwrap()
+            }
+            "directory" => {
+                std::fs::set_permissions(&files, std::fs::Permissions::from_mode(0o0)).unwrap()
+            }
+            _ => std::fs::set_permissions(&entity, std::fs::Permissions::from_mode(0o0)).unwrap(),
+        }
+        let (status, error) = f.json("GET", &path, Value::Null).await;
+        // 先恢复测试资源，再断言，保证失败时临时目录仍能安全清理。
+        std::fs::set_permissions(&files, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::set_permissions(&entity, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::fs::write(files.join("storage-id"), &identity).unwrap();
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(error["code"], "unavailable");
+        assert!(!error.to_string().contains(f._root.path().to_str().unwrap()));
+        assert_eq!(
+            f.json("GET", &format!("/api/sends/{send}"), Value::Null)
+                .await
+                .1,
+            original
+        );
+    }
+    // 目录被替换为空目录（模拟挂载缺失）也不能变成单文件丢失。
+    let held = f._root.path().join("held-files");
+    std::fs::rename(&files, &held).unwrap();
+    std::fs::create_dir(&files).unwrap();
+    let result = f.json("GET", &path, Value::Null).await;
+    std::fs::remove_dir(&files).unwrap();
+    std::fs::rename(&held, &files).unwrap();
+    assert_eq!(result.1["code"], "unavailable");
+    assert_eq!(
+        f.json("GET", &format!("/api/sends/{send}"), Value::Null)
+            .await
+            .1,
+        original
+    );
+    // 既有启动协调遇到明确的大小异常时持久记录；不新增定时扫描或内容校验。
+    std::fs::write(&entity, "a").unwrap();
+    backend::files_recover(&f._root.path().join("database"), &files)
+        .await
+        .unwrap();
+    let current = f
+        .json("GET", &format!("/api/sends/{send}"), Value::Null)
+        .await
+        .1;
+    assert_eq!(current["file_state"], "storage_error");
+    assert_eq!(current["state_version"], "2");
+    assert_eq!(current["id"], original["id"]);
+}
+
+#[tokio::test]
+async fn file_status_queries_are_bounded_authenticated_and_do_not_probe_entities() {
+    let f = Fixture::new().await;
+    let send = uuid::Uuid::new_v4().to_string();
+    let attempt = uuid::Uuid::new_v4().to_string();
+    f.json("POST", "/api/file-sends", json!({"send_id":send,"attempt_id":attempt,"name":"status.txt","size":0,"mime":"","source_label":"Desk"})).await;
+    let response = f
+        .request(
+            "PUT",
+            &format!("/api/file-sends/{send}/attempts/{attempt}/content"),
+            Body::empty(),
+        )
+        .await;
+    let original: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 4096).await.unwrap()).unwrap();
+    let file = original["file_id"].as_str().unwrap();
+    let path = format!("/api/files/{file}/status");
+    let expected = json!({"file_id":file,"file_state":"available","state_version":"1"});
+    std::fs::remove_file(f._root.path().join("files").join(file)).unwrap();
+    assert_eq!(
+        f.json("GET", &path, Value::Null).await,
+        (StatusCode::OK, expected.clone())
+    );
+    let unknown = uuid::Uuid::new_v4().to_string();
+    assert_eq!(
+        f.json(
+            "POST",
+            "/api/files/status-query",
+            json!({"file_ids":[file, unknown]})
+        )
+        .await
+        .1,
+        json!({"files":[expected],"not_found":[unknown]})
+    );
+    for body in [
+        json!({"file_ids":[]}),
+        json!({"file_ids":vec![file;101]}),
+        json!({"file_ids":["../other"]}),
+        json!({"file_ids":[file],"extra":true}),
+    ] {
+        assert_eq!(
+            f.json("POST", "/api/files/status-query", body).await.0,
+            StatusCode::BAD_REQUEST
+        );
+    }
+    assert_eq!(
+        f.json("GET", &format!("/api/files/{unknown}/status"), Value::Null)
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    for (method, uri) in [("GET", path.as_str()), ("POST", "/api/files/status-query")] {
+        let r = f
+            .app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header("origin", "https://filehop.invalid")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(r.headers()["cache-control"], "no-store");
+    }
+    for origin in [None, Some("https://other.invalid"), Some("null")] {
+        let mut request = Request::builder()
+            .method("POST")
+            .uri("/api/files/status-query")
+            .header("cookie", &f.cookie)
+            .header("content-type", "application/json");
+        if let Some(origin) = origin {
+            request = request.header("origin", origin);
+        }
+        assert_eq!(
+            f.app
+                .clone()
+                .oneshot(
+                    request
+                        .body(Body::from(json!({"file_ids":[file]}).to_string()))
+                        .unwrap()
+                )
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+    }
+    f.request("HEAD", &format!("/api/files/{file}"), Body::empty())
+        .await;
+    let changed = json!({"file_id":file,"file_state":"storage_error","state_version":"2"});
+    assert_eq!(f.json("GET", &path, Value::Null).await.1, changed);
+    assert_eq!(
+        f.json(
+            "POST",
+            "/api/files/status-query",
+            json!({"file_ids":[file,file]})
+        )
+        .await
+        .1,
+        json!({"files":[changed],"not_found":[]})
+    );
+}
+
+#[tokio::test]
 async fn server_file_list_is_authenticated_committed_only_and_cursor_paginated() {
     let f = Fixture::new().await;
     let denied = f
