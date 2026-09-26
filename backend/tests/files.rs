@@ -85,6 +85,114 @@ impl Fixture {
     }
 }
 #[tokio::test]
+async fn server_file_list_is_authenticated_committed_only_and_cursor_paginated() {
+    let f = Fixture::new().await;
+    let denied = f
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/files?limit=bad")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(denied.headers()["cache-control"], "no-store");
+    let response = f.request("GET", "/api/files", Body::empty()).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    let (_, empty) = f.json("GET", "/api/files", Value::Null).await;
+    assert_eq!(empty, json!({"files":[], "before":null, "has_more":false}));
+    let pending = json!({"send_id":uuid::Uuid::new_v4().to_string(),"attempt_id":uuid::Uuid::new_v4().to_string(),"name":"not committed","size":0,"mime":"","source_label":"Web"});
+    assert_eq!(
+        f.json("POST", "/api/file-sends", pending).await.0,
+        StatusCode::OK
+    );
+    let mut committed = Vec::new();
+    for n in 0..52 {
+        let send = uuid::Uuid::new_v4().to_string();
+        let attempt = uuid::Uuid::new_v4().to_string();
+        let input = json!({"send_id":send,"attempt_id":attempt,"name":format!("file-{n}.txt"),"size":0,"mime":"text/plain","source_label":"Desk"});
+        assert_eq!(
+            f.json("POST", "/api/file-sends", input).await.0,
+            StatusCode::OK
+        );
+        let response = f
+            .request(
+                "PUT",
+                &format!("/api/file-sends/{send}/attempts/{attempt}/content"),
+                Body::empty(),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let message: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 4096).await.unwrap()).unwrap();
+        assert_eq!(message["state_version"], "1");
+        assert_eq!(
+            f.json("GET", &format!("/api/sends/{send}"), Value::Null)
+                .await
+                .1,
+            message
+        );
+        assert_eq!(
+            f.json("GET", &format!("/api/file-sends/{send}"), Value::Null)
+                .await
+                .1["message"],
+            message
+        );
+        committed.push(message);
+    }
+    let (_, text) = f.json("POST", "/api/messages", json!({"send_id":uuid::Uuid::new_v4().to_string(), "text":"not a server file", "source_label":"Desk"})).await;
+    assert!(text.get("state_version").is_none());
+    committed.reverse();
+    let (_, first) = f.json("GET", "/api/files", Value::Null).await;
+    assert_eq!(first["files"], json!(committed[..50]));
+    assert_eq!(first["has_more"], true);
+    assert_eq!(first["before"], committed[49]["id"]);
+    let (_, last) = f
+        .json(
+            "GET",
+            &format!("/api/files?before={}", first["before"].as_str().unwrap()),
+            Value::Null,
+        )
+        .await;
+    assert_eq!(last["files"], json!(committed[50..]));
+    assert_eq!(last["has_more"], false);
+    assert_eq!(
+        f.json("GET", "/api/files?limit=100", Value::Null).await.1["files"],
+        json!(committed)
+    );
+    for query in [
+        "limit=0",
+        "limit=101",
+        "before=0",
+        "before=-1",
+        "after=1",
+        "limit=bad",
+    ] {
+        assert_eq!(
+            f.json("GET", &format!("/api/files?{query}"), Value::Null)
+                .await
+                .0,
+            StatusCode::BAD_REQUEST
+        );
+    }
+    let (_, history) = f.json("GET", "/api/messages?limit=100", Value::Null).await;
+    let mut chronological = committed.clone();
+    chronological.reverse();
+    chronological.push(text);
+    assert_eq!(history["messages"], json!(chronological));
+    // 重建应用后文件列表和版本保持一致，已提交记录不能随页面或应用对象重建丢失。
+    let f = Fixture::from_paths(f._root).await;
+    assert_eq!(
+        f.json("GET", "/api/files?limit=100", Value::Null).await.1["files"],
+        json!(committed)
+    );
+}
+
+#[tokio::test]
 async fn stop_before_prepare_is_durable_and_successor_can_register_missing_metadata() {
     let f = Fixture::new().await;
     let send = uuid::Uuid::new_v4().to_string();

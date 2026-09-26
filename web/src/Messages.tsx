@@ -4,7 +4,7 @@ import { Button } from '@cloudflare/kumo/components/button'
 import { Input, Textarea } from '@cloudflare/kumo/components/input'
 import { LayerCard } from '@cloudflare/kumo/components/layer-card'
 import { Text } from '@cloudflare/kumo/components/text'
-import { type useMessages, validLabel, validText } from './messages'
+import { fileStateLabels, type useMessages, validLabel, validText } from './messages'
 import { type useFiles } from './files'
 
 export default function Messages({ exchange, files }: { exchange: ReturnType<typeof useMessages>; files: ReturnType<typeof useFiles> }) {
@@ -82,7 +82,8 @@ export default function Messages({ exchange, files }: { exchange: ReturnType<typ
           </> : <div>
             {/* 文件消息不是空文本；只展示元数据，下载交给浏览器处理，不把不可信内容内联渲染。 */}
             <Text>{message.file_name} · {message.file_size.toLocaleString('zh-CN')} 字节 · {message.file_mime || '未知类型'}</Text>
-            <a href={`/api/files/${encodeURIComponent(message.file_id)}`} download onClick={event => { event.preventDefault(); void download(message.file_id) }}>下载附件</a>
+            <Text>{fileStateLabels[message.file_state]}</Text>
+            {message.file_state === 'available' && <a href={`/api/files/${encodeURIComponent(message.file_id)}`} download onClick={event => { event.preventDefault(); void download(message.file_id) }}>下载附件</a>}
           </div>}
         </LayerCard>)}
       </div>

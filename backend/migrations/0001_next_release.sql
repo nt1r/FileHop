@@ -17,7 +17,11 @@ CREATE TABLE message (
     file_id TEXT,
     file_name TEXT,
     file_size INTEGER,
-    file_mime TEXT
+    file_mime TEXT,
+    -- 文件成功提交时从版本 1 开始；后续状态迁移必须与版本递增同事务提交。
+    -- 文本不携带文件状态；普通查询只读已知状态，不逐个扫描磁盘。
+    file_state TEXT NOT NULL DEFAULT 'available' CHECK (file_state IN ('available', 'storage_error', 'deleting', 'deleted')),
+    state_version INTEGER NOT NULL DEFAULT 1 CHECK (state_version > 0)
 );
 CREATE TABLE account (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),

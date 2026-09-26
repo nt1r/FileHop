@@ -2,8 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 
 export type Message = { id: string; send_id: string; source_label: string; created_at: string } & (
   { kind: 'TEXT'; text: string } |
-  { kind: 'FILE'; file_id: string; file_name: string; file_size: number; file_mime: string; file_state: 'available' }
+  { kind: 'FILE'; file_id: string; file_name: string; file_size: number; file_mime: string; file_state: 'available' | 'storage_error' | 'deleting' | 'deleted'; state_version: string }
 )
+export const fileStateLabels = {
+  available: '可用', storage_error: '存储异常', deleting: '删除处理中，空间尚未释放', deleted: '服务器文件已删除',
+}
 type Attempt = { send_id: string; text: string; source_label: string; state: 'sending' | 'unknown' | 'checking'; uncertain?: boolean }
 type Model = { draft: string; attempt: Attempt | null; messages: Message[]; syncCursor: string | null; before: string | null; hasOlder: boolean; historyNotice: string; notice: string; reading: boolean }
 const unknownNotice = '结果未确认：正文与发送标识已保留，请主动读取历史确认；不会自动重发。'
@@ -27,7 +30,8 @@ export function isMessage(value: unknown): value is Message {
   if (m.kind === 'TEXT') return typeof m.text === 'string'
   return m.kind === 'FILE' && typeof m.file_id === 'string' && typeof m.file_name === 'string' &&
     typeof m.file_size === 'number' && Number.isSafeInteger(m.file_size) && m.file_size >= 0 &&
-    typeof m.file_mime === 'string' && m.file_state === 'available'
+    typeof m.file_mime === 'string' && ['available', 'storage_error', 'deleting', 'deleted'].includes(m.file_state) &&
+    typeof m.state_version === 'string' && /^[1-9][0-9]*$/.test(m.state_version)
 }
 function matches(message: Message, attempt: Attempt) {
   return message.kind === 'TEXT' && message.send_id === attempt.send_id && message.text === attempt.text && message.source_label === attempt.source_label
@@ -89,7 +93,12 @@ export function useMessages(active: boolean, onExpired: () => void) {
   function merge(messages: Message[], cursor?: string) {
     const state = current.current
     const merged = new Map(state.messages.map(m => [m.id, m]))
-    for (const message of messages) merged.set(message.id, message)
+    for (const message of messages) {
+      const previous = merged.get(message.id)
+      // 重复历史或发送回执只补消息，不能用旧版本覆盖已经得知的文件状态。
+      merged.set(message.id, previous?.kind === 'FILE' && message.kind === 'FILE' &&
+        BigInt(previous.state_version) >= BigInt(message.state_version) ? previous : message)
+    }
     const confirmed = state.attempt && messages.some(m => matches(m, state.attempt!))
     update({ ...state, messages: [...merged.values()].sort((a, b) => BigInt(a.id) < BigInt(b.id) ? -1 : 1),
       // 只有完整读取成功才建立快照基线，本地发送响应不能挪动新增读取游标。

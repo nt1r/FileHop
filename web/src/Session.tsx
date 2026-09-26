@@ -5,6 +5,7 @@ import { Input } from '@cloudflare/kumo/components/input'
 import { LayerCard } from '@cloudflare/kumo/components/layer-card'
 import { Text } from '@cloudflare/kumo/components/text'
 import Messages from './Messages'
+import ServerFiles from './ServerFiles'
 import { useMessages } from './messages'
 import { useFiles } from './files'
 
@@ -53,6 +54,7 @@ async function request(method: 'GET' | 'POST' | 'DELETE', credentials?: { userna
 }
 
 export default function SessionPage() {
+  const [page, setPage] = useState<'messages' | 'files'>('messages')
   const [phase, setPhase] = useState<Phase>('checking')
   const [message, setMessage] = useState('正在恢复登录…')
   const [username, setUsername] = useState('')
@@ -79,6 +81,7 @@ export default function SessionPage() {
   function clearForLogout(notice: LogoutNotice) {
     // 通知只存在于当前打开的页面，不写持久化锁。先废弃所有在途回调，
     // 再清空页面；即使 Cookie 仍有效，也不能通过前台恢复或迟到响应重现内容。
+    setPage('messages')
     exchange.suspend(true)
     files.suspend(true)
     generation.current++
@@ -254,7 +257,12 @@ export default function SessionPage() {
           <Button variant="secondary" icon={<SignOutIcon />} onClick={() => void logout()}>退出登录</Button>
         </div>
       </div>
-      <Messages exchange={exchange} files={files} />
+      <nav className="action-row" aria-label="工作区导航">
+        <Button variant={page === 'messages' ? 'primary' : 'secondary'} aria-pressed={page === 'messages'} onClick={() => setPage('messages')}>消息工作区</Button>
+        <Button variant={page === 'files' ? 'primary' : 'secondary'} aria-pressed={page === 'files'} onClick={() => setPage('files')}>服务器文件</Button>
+      </nav>
+      {/* 草稿、发送与上传调度由会话层持有，切换视图不改变认证或任务生命周期。 */}
+      {page === 'messages' ? <Messages exchange={exchange} files={files} /> : <ServerFiles files={files} onExpired={expire} />}
     </>}
   </section>
 }
