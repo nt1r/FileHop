@@ -85,6 +85,78 @@ impl Fixture {
     }
 }
 #[tokio::test]
+async fn storage_snapshot_is_private_and_moves_reservations_to_saved() {
+    let f = Fixture::new().await;
+    let denied = f
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/storage")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(denied.headers()["cache-control"], "no-store");
+    let response = f.request("GET", "/api/storage", Body::empty()).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    let (_, empty) = f.json("GET", "/api/storage", Value::Null).await;
+    assert_eq!(
+        empty,
+        json!({"quota_bytes":"1073741824", "saved_bytes":"0", "reserved_bytes":"0", "cleaning_bytes":"0", "available_bytes":"1073741824", "over_quota":false})
+    );
+    let send = uuid::Uuid::new_v4().to_string();
+    let attempt = uuid::Uuid::new_v4().to_string();
+    let input = json!({"send_id":send,"attempt_id":attempt,"name":"snapshot","size":3,"mime":"","source_label":"Web"});
+    assert_eq!(
+        f.json("POST", "/api/file-sends", input).await.0,
+        StatusCode::OK
+    );
+    let (_, reserved) = f.json("GET", "/api/storage", Value::Null).await;
+    assert_eq!(reserved["reserved_bytes"], "3");
+    assert_eq!(reserved["available_bytes"], "1073741821");
+    assert_eq!(
+        f.request(
+            "PUT",
+            &format!("/api/file-sends/{send}/attempts/{attempt}/content"),
+            Body::from("abc")
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
+    let (_, saved) = f.json("GET", "/api/storage", Value::Null).await;
+    assert_eq!(saved["saved_bytes"], "3");
+    assert_eq!(saved["reserved_bytes"], "0");
+    assert_eq!(saved["cleaning_bytes"], "0");
+    assert_eq!(saved["available_bytes"], "1073741821");
+    // 用同一隔离实例的持久数据重新加载更低额度，不改写或删除已保存文件。
+    let mut config = backend::session::Config::default();
+    config.transfer.quota = 2;
+    let app = backend::app_with_config(
+        f._root.path().join("database"),
+        f._root.path().join("files"),
+        config,
+    );
+    let f = Fixture::with_app(f._root, app).await;
+    let (_, lowered) = f.json("GET", "/api/storage", Value::Null).await;
+    assert_eq!(
+        lowered,
+        json!({"quota_bytes":"2", "saved_bytes":"3", "reserved_bytes":"0", "cleaning_bytes":"0", "available_bytes":"0", "over_quota":true})
+    );
+    assert_eq!(
+        f.json("GET", "/api/files", Value::Null).await.1["files"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
 async fn server_file_list_is_authenticated_committed_only_and_cursor_paginated() {
     let f = Fixture::new().await;
     let denied = f
@@ -449,6 +521,11 @@ async fn stop_during_a_stream_forbids_commit_and_keeps_quota_until_writer_exits(
     })
     .await;
     ready.unwrap();
+    let (_, usage) = f.json("GET", "/api/storage", Value::Null).await;
+    assert_eq!(
+        usage,
+        json!({"quota_bytes":"3", "saved_bytes":"0", "reserved_bytes":"3", "cleaning_bytes":"0", "available_bytes":"0", "over_quota":false})
+    );
     let stop = format!("/api/file-sends/{send}/attempts/{attempt}/stop");
     assert_eq!(
         f.json("POST", &stop, Value::Null).await.1["state"],
@@ -698,6 +775,11 @@ async fn concurrent_reservations_obey_quota_and_text_cannot_reuse_a_file_identit
             .filter(|&&s| s == StatusCode::CONFLICT || s == StatusCode::TOO_MANY_REQUESTS)
             .count(),
         1
+    );
+    let (_, usage) = f.json("GET", "/api/storage", Value::Null).await;
+    assert_eq!(
+        usage,
+        json!({"quota_bytes":"5", "saved_bytes":"0", "reserved_bytes":"3", "cleaning_bytes":"0", "available_bytes":"2", "over_quota":false})
     );
     let winning = if first.0 == StatusCode::OK { a } else { b };
     assert_eq!(

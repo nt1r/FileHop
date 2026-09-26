@@ -356,6 +356,40 @@ pub async fn recover(
     }
     Ok(())
 }
+pub(crate) async fn storage(State(service): State<Arc<Service>>, headers: HeaderMap) -> Response {
+    let (mut db, _) = match authenticate(&service, &headers).await {
+        Ok(value) => value,
+        Err(e) => return *e,
+    };
+    // 一条 SELECT 读取同一数据库快照，避免提交或清理恰好发生在分类查询之间，
+    // 导致同一份预留被重复计入或遗漏。临时文件已经包含在完整预留中，不另扫磁盘。
+    let usage: Result<(i64, i64, i64), _> = sqlx::query_as(
+        "SELECT COALESCE(SUM(CASE WHEN state='success' THEN reserved ELSE 0 END),0),
+                COALESCE(SUM(CASE WHEN state IN ('prepared','writing') THEN reserved ELSE 0 END),0),
+                COALESCE(SUM(CASE WHEN state='cleaning' THEN reserved ELSE 0 END),0)
+         FROM file_send",
+    )
+    .fetch_one(&mut db)
+    .await;
+    let (saved, reserved, cleaning) = match usage {
+        Ok(value) => value,
+        Err(_) => return unavailable(),
+    };
+    let quota = service.config.transfer.quota;
+    let used = i128::from(saved) + i128::from(reserved) + i128::from(cleaning);
+    json(
+        StatusCode::OK,
+        serde_json::json!({
+            "quota_bytes": quota.to_string(),
+            "saved_bytes": saved.to_string(),
+            "reserved_bytes": reserved.to_string(),
+            "cleaning_bytes": cleaning.to_string(),
+            "available_bytes": (i128::from(quota) - used).max(0).to_string(),
+            "over_quota": used > i128::from(quota),
+        }),
+    )
+}
+
 pub(crate) async fn limits(State(service): State<Arc<Service>>, headers: HeaderMap) -> Response {
     if let Err(e) = authenticate(&service, &headers).await {
         return *e;
