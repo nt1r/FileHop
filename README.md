@@ -1,5 +1,7 @@
 # FileHop
 
+<!-- Synthetic documentation-only CI scope validation; do not merge. -->
+
 轻量、自托管的跨设备文本与文件交换工具，面向个人使用。
 
 FileHop 希望让桌面浏览器与 Android 手机通过自己的服务器共享一条私人消息流，方便传递文字、链接、命令片段和文件，无需选择接收设备。
