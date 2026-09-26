@@ -14,6 +14,7 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
   const [limits, setLimits] = useState<Limits>('loading')
   const tasksRef = useRef(tasks)
   const limitsRef = useRef(limits)
+  const uploadTimeout = useRef(0)
   const live = useRef(active)
   const epoch = useRef(0)
   const xhr = useRef(new Map<string, XMLHttpRequest>())
@@ -80,7 +81,12 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
       const data: unknown = await response.json()
       if (version !== epoch.current || !live.current) return
       if (!data || typeof data !== 'object' || !('max_file_size_bytes' in data) ||
-        typeof data.max_file_size_bytes !== 'number' || !Number.isSafeInteger(data.max_file_size_bytes) || data.max_file_size_bytes < 0) throw Error()
+        typeof data.max_file_size_bytes !== 'number' || !Number.isSafeInteger(data.max_file_size_bytes) || data.max_file_size_bytes < 0 ||
+        !('upload_total_timeout_seconds' in data) || typeof data.upload_total_timeout_seconds !== 'number' ||
+        !Number.isSafeInteger(data.upload_total_timeout_seconds) || data.upload_total_timeout_seconds < 1 ||
+        data.upload_total_timeout_seconds > 4294907) throw Error()
+      // XHR 的毫秒期限是 uint32；额外一分钟只用于等待提交响应，不代表成功或回滚。
+      uploadTimeout.current = (data.upload_total_timeout_seconds + 60) * 1000
       limitsRef.current = data.max_file_size_bytes
       setLimits(data.max_file_size_bytes)
       // 新登录先取得当前能力，再查询原发送身份；全部未知项协调前仍由 unresolved 挡住等待项。
@@ -207,7 +213,7 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
       upload.responseType = 'json'
       upload.setRequestHeader('Content-Type', 'application/octet-stream')
       // 浏览器会发送同源 Cookie 与 Origin；不能将控制请求的 15 秒期限用于文件体。
-      upload.timeout = 31 * 60 * 1000
+      upload.timeout = uploadTimeout.current
       upload.upload.onprogress = event => {
         if (version !== epoch.current || !live.current || tasksRef.current.find(item => item.sendId === task.sendId)?.stopRequested) return
         patch(task.sendId, { progress: event.total ? Math.min(100, Math.round(event.loaded / event.total * 100)) : 0,

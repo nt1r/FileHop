@@ -18,6 +18,11 @@ const upstream = http.createServer((req, res) => {
     req.on('end', () => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ bytes })) })
     return
   }
+  if (req.url === '/api/files/no-headers') {
+    // 请求已结束但上游从不返回响应头，应由独立首响应期限终结。
+    req.resume()
+    return
+  }
   if (req.url === '/api/files/probe') {
     res.setHeader('Content-Type', 'application/octet-stream')
     res.setHeader('Content-Disposition', 'attachment; filename="probe.bin"')
@@ -59,7 +64,7 @@ https://localhost:${port} {
   writeFileSync(`${root}/Caddyfile`, config)
   let logs = ''
   child = spawn('caddy', ['run', '--config', `${root}/Caddyfile`, '--adapter', 'caddyfile'], {
-    env: { ...process.env, XDG_DATA_HOME: `${root}/data`, XDG_CONFIG_HOME: `${root}/config`, FILEHOP_DEV_USER: 'test', FILEHOP_DEV_PASSWORD_HASH: hash.stdout.trim(), FILEHOP_BACKEND_UPSTREAM: `127.0.0.1:${upstreamPort}`, FILEHOP_WEB_UPSTREAM: `127.0.0.1:${upstreamPort}` },
+    env: { ...process.env, XDG_DATA_HOME: `${root}/data`, XDG_CONFIG_HOME: `${root}/config`, FILEHOP_DEV_USER: 'test', FILEHOP_DEV_PASSWORD_HASH: hash.stdout.trim(), FILEHOP_BACKEND_UPSTREAM: `127.0.0.1:${upstreamPort}`, FILEHOP_WEB_UPSTREAM: `127.0.0.1:${upstreamPort}`, FILEHOP_PROXY_CONNECT_TIMEOUT: '1s', FILEHOP_PROXY_RESPONSE_HEADER_TIMEOUT: '1s' },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   child.stdout.on('data', b => { logs += b })
@@ -93,6 +98,7 @@ https://localhost:${port} {
     if (path.startsWith('/api/')) assert.equal(JSON.parse(res.body).clientIp, '127.0.0.1')
   }
   assert.equal((await request('/internal/live', { authorization: auth })).status, 404)
+  assert.equal((await request('/api/files/no-headers', { authorization: auth })).status, 504)
   // 独立 HTTPS 入口不能沿用 JSON 请求的 15 秒整体期限；上游逐块接收文件体。
   const streamed = new Promise((resolve, reject) => {
     const req = https.request({ host: '127.0.0.1', port, path: '/api/file-sends/probe/attempts/probe/content',
