@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { isMessage, normalizeLabel, validLabel, type Message } from './messages'
 
-type Task = { file: File; sendId: string; attemptId: string; previousAttemptId?: string; source: string; name: string; size: number; progress: number; status: string; pending: boolean; stopping?: boolean; stopRequested?: boolean; abandoned?: boolean }
+// queued 尚未申请额度；pending 是本页请求在途；unresolved 表示尚不能确认服务端状态，须暂停新上传。
+// 已查询到仍活动的任务继续占名额，但不再以网络未知为由阻塞其他空闲名额。
+type Task = { file: File; sendId: string; attemptId: string; previousAttemptId?: string; source: string; name: string; size: number; progress: number; status: string; pending: boolean; queued?: boolean; unresolved?: boolean; stopping?: boolean; stopRequested?: boolean; abandoned?: boolean }
 type Limits = 'loading' | 'unavailable' | number
 const unknown = '结果未确认：请先检查消息历史；本页不会自动重发或更换发送标识。'
 const pendingCleanup = '结果未确认：清理未完成，空间尚未释放；请先检查消息历史。'
@@ -14,8 +16,10 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
   const limitsRef = useRef(limits)
   const live = useRef(active)
   const epoch = useRef(0)
-  const xhr = useRef<XMLHttpRequest | null>(null)
-  const control = useRef<AbortController | null>(null)
+  const xhr = useRef(new Map<string, XMLHttpRequest>())
+  const controls = useRef(new Map<string, AbortController>())
+  const [online, setOnline] = useState(navigator.onLine)
+  const preparingQueue = useRef(false)
   live.current = active
   const expired = useRef(onExpired)
   expired.current = onExpired
@@ -23,16 +27,19 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
   received.current = onMessage
   function update(next: Task[]) { tasksRef.current = next; setTasks(next) }
   function patch(sendId: string, change: Partial<Task>) {
-    update(tasksRef.current.map(task => task.sendId === sendId ? { ...task, ...change } : task))
+    update(tasksRef.current.map(task => task.sendId === sendId ? { ...task,
+      ...(change.status && !change.pending ? { unresolved: change.status.startsWith('结果未确认：') } : {}), ...change } : task))
   }
   function reset() {
     epoch.current++
-    xhr.current?.abort()
-    control.current?.abort()
+    for (const upload of xhr.current.values()) upload.abort()
+    for (const controller of controls.current.values()) controller.abort()
+    xhr.current.clear(); controls.current.clear()
     tasksRef.current = []
     limitsRef.current = 'loading'
   }
   function suspend(clear: boolean) {
+    live.current = false
     epoch.current++
     // 到期不能截断已经认证的 PUT；退出时才中止本页上传。服务器负责最终裁决及超时清理。
     if (clear) {
@@ -42,10 +49,13 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
           method: 'POST', credentials: 'same-origin', cache: 'no-store', keepalive: true,
         }).catch(() => {})
       }
-      control.current?.abort(); xhr.current?.abort()
-    } else control.current?.abort()
+      for (const upload of xhr.current.values()) upload.abort()
+      xhr.current.clear()
+    }
+    for (const controller of controls.current.values()) controller.abort()
+    controls.current.clear()
     if (clear) update([])
-    else update(tasksRef.current.map(task => task.pending ? { ...task, status: unknown, pending: false, stopping: false } : task))
+    else update(tasksRef.current.map(task => task.pending ? { ...task, status: unknown, pending: false, unresolved: true, stopping: false } : task))
     setLimits('loading'); limitsRef.current = 'loading'
   }
   async function refresh() {
@@ -53,7 +63,7 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
     const version = epoch.current
     setLimits('loading'); limitsRef.current = 'loading'
     const controller = new AbortController()
-    control.current = controller
+    controls.current.set('limits', controller)
     const timer = window.setTimeout(() => controller.abort(), 15000)
     try {
       const response = await fetch('/api/transfer-limits', { credentials: 'same-origin', cache: 'no-store', signal: controller.signal })
@@ -64,12 +74,13 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
       }
       if (!response.ok || response.headers.has('x-filehop-access-layer') || !response.headers.get('content-type')?.includes('application/json')) throw Error()
       const data: unknown = await response.json()
+      if (version !== epoch.current || !live.current) return
       if (!data || typeof data !== 'object' || !('max_file_size_bytes' in data) ||
         typeof data.max_file_size_bytes !== 'number' || !Number.isSafeInteger(data.max_file_size_bytes) || data.max_file_size_bytes < 0) throw Error()
       limitsRef.current = data.max_file_size_bytes
       setLimits(data.max_file_size_bytes)
     } catch { if (version === epoch.current && live.current) { limitsRef.current = 'unavailable'; setLimits('unavailable') } }
-    finally { window.clearTimeout(timer); if (control.current === controller) control.current = null }
+    finally { window.clearTimeout(timer); if (controls.current.get('limits') === controller) controls.current.delete('limits') }
   }
   useEffect(() => {
     if (active) {
@@ -82,7 +93,7 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
   }, [active])
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
-      if (tasksRef.current.some(task => task.pending || uncertain(task))) { event.preventDefault(); event.returnValue = '' }
+      if (tasksRef.current.some(task => task.queued || task.pending || uncertain(task))) { event.preventDefault(); event.returnValue = '' }
     }
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)
@@ -90,31 +101,66 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
   useEffect(() => {
     if (!active) return
     const timer = window.setInterval(() => {
-      if (!navigator.onLine) return
+      if (!navigator.onLine || document.visibilityState !== 'visible') return
       for (const task of tasksRef.current.filter(task => uncertain(task) && !task.pending)) void inspect(task, false)
     }, 10000)
     return () => window.clearInterval(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active])
-  async function choose(file: File, label: string) {
-    if (!live.current || typeof limitsRef.current !== 'number' || !validLabel(label) ||
-      tasksRef.current.some(task => task.pending || uncertain(task))) return
+  // 名额在准备请求前同步占用；等待项只在内存中，不能提前向服务器预留额度。
+  function pump() {
+    if (!live.current || !navigator.onLine || document.visibilityState !== 'visible' ||
+      preparingQueue.current || typeof limitsRef.current !== 'number' || tasksRef.current.some(task => task.unresolved)) return
+    if (tasksRef.current.filter(task => task.pending || uncertain(task)).length >= 3) return
+    const task = tasksRef.current.find(task => task.queued)
+    if (!task) return
+    patch(task.sendId, { queued: false, pending: true, status: '准备上传…' })
+    // 准入持有短时全局锁；本页依次申请，获准后文件体仍可三个并行，避免自己触发背压拒绝。
+    preparingQueue.current = true
+    void prepare(task)
+  }
+  useEffect(() => { pump() }, [tasks, limits, active, online])
+  useEffect(() => {
+    const resume = () => {
+      setOnline(navigator.onLine)
+      if (!live.current || !navigator.onLine || document.visibilityState !== 'visible') return
+      // 查询期间仍保留未知标记，最后一项确认后才接续等待项。
+      for (const task of tasksRef.current.filter(task => uncertain(task) && !task.pending)) void inspect(task, false)
+      pump()
+    }
+    window.addEventListener('online', resume)
+    window.addEventListener('offline', resume)
+    document.addEventListener('visibilitychange', resume)
+    return () => {
+      window.removeEventListener('online', resume)
+      window.removeEventListener('offline', resume)
+      document.removeEventListener('visibilitychange', resume)
+    }
+  }, [])
+  async function choose(files: File[], label: string) {
+    if (!live.current || typeof limitsRef.current !== 'number' || !validLabel(label) || !navigator.onLine) return
     // 文件选择前的快照只供展示；选择后再取一次有效上限，无法确认时不猜测准入能力。
     const selectionVersion = epoch.current
     await refresh()
-    if (selectionVersion !== epoch.current || !live.current || typeof limitsRef.current !== 'number') return
-    if (tasksRef.current.some(task => task.pending || uncertain(task))) return
+    if (selectionVersion !== epoch.current || !live.current || !navigator.onLine || typeof limitsRef.current !== 'number') return
     const source = normalizeLabel(label)
-    const task: Task = { file, sendId: crypto.randomUUID(), attemptId: crypto.randomUUID(), source, name: file.name,
-      size: file.size, progress: 0, status: '准备上传…', pending: true }
-    update([...tasksRef.current, task])
-    if (file.size > limitsRef.current) { patch(task.sendId, { status: '文件超过服务器单文件上限', pending: false }); return }
-    if (new TextEncoder().encode(file.name).length > 1024 || !file.name || file.name.includes('\0') || file.type.length > 255) {
-      patch(task.sendId, { status: '文件元数据不符合服务器要求', pending: false }); return
-    }
+    const maximum = limitsRef.current
+    const added: Task[] = files.map(file => {
+      const invalid = file.size > maximum ? '文件超过服务器单文件上限' :
+        new TextEncoder().encode(file.name).length > 1024 || !file.name || file.name.includes('\0') || file.type.length > 255 ? '文件元数据不符合服务器要求' : ''
+      return { file, sendId: crypto.randomUUID(), attemptId: crypto.randomUUID(), source, name: file.name,
+        size: file.size, progress: 0, status: invalid || '等待上传', pending: false, queued: !invalid }
+    })
+    update([...tasksRef.current, ...added])
+  }
+  function remove(sendId: string) {
+    update(tasksRef.current.filter(task => task.sendId !== sendId || !task.queued))
+  }
+  async function prepare(task: Task) {
+    const { file, source } = task
     const version = epoch.current
     const preparing = new AbortController()
-    control.current = preparing
+    controls.current.set(task.sendId, preparing)
     const timer = window.setTimeout(() => preparing.abort(), 15000)
     try {
       const response = await fetch('/api/file-sends', { method: 'POST', credentials: 'same-origin', cache: 'no-store',
@@ -143,14 +189,16 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
         patch(task.sendId, { status: unknown, pending: false })
     } finally {
       window.clearTimeout(timer)
-      if (control.current === preparing) control.current = null
+      if (controls.current.get(task.sendId) === preparing) controls.current.delete(task.sendId)
+      preparingQueue.current = false
+      pump()
     }
   }
   function transmit(task: Task, version: number) {
       const { file, source } = task
       patch(task.sendId, { status: '正在传输…', pending: true, progress: 0 })
       const upload = new XMLHttpRequest()
-      xhr.current = upload
+      xhr.current.set(task.sendId, upload)
       upload.open('PUT', `/api/file-sends/${task.sendId}/attempts/${task.attemptId}/content`)
       upload.responseType = 'json'
       upload.setRequestHeader('Content-Type', 'application/octet-stream')
@@ -162,7 +210,7 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
           status: event.lengthComputable && event.loaded >= event.total ? '数据已发送，等待服务器确认…' : '正在传输…' })
       }
       upload.onload = () => {
-        if (xhr.current === upload) xhr.current = null
+        if (xhr.current.get(task.sendId) === upload) xhr.current.delete(task.sendId)
         if (version !== epoch.current || !live.current || tasksRef.current.find(item => item.sendId === task.sendId)?.stopRequested) return
         const value = upload.response
         if (upload.status === 200 && isMessage(value) && value.kind === 'FILE' && value.send_id === task.sendId &&
@@ -175,11 +223,11 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
           }
           // 失败清理完成才能明确断言未提交；清理待定和服务器故障均保留未确认状态。
           patch(task.sendId, { status: value.code === 'upload_failed' ? `上传失败：${value.message}` :
-            value.code === 'cleanup_pending' ? pendingCleanup : unknown, pending: false })
+            value.code === 'cleanup_pending' ? '上传失败，清理未完成，空间尚未释放；可稍后查询。' : unknown, pending: false })
         } else patch(task.sendId, { status: unknown, pending: false })
       }
       upload.onerror = upload.ontimeout = upload.onabort = () => {
-        if (xhr.current === upload) xhr.current = null
+        if (xhr.current.get(task.sendId) === upload) xhr.current.delete(task.sendId)
         if (version === epoch.current && live.current && !tasksRef.current.find(item => item.sendId === task.sendId)?.stopRequested)
           patch(task.sendId, { status: unknown, pending: false })
       }
@@ -187,18 +235,21 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
   }
   // 未收到响应时先查发送身份；只有服务器确认失败且旧实体清理完成，才允许从头重传。
   async function inspect(task: Task, retry: boolean) {
-    if (!live.current || task.pending || task.stopping || (retry && task.abandoned)) return
+    if (!live.current || task.queued || task.pending || task.stopping || (retry && task.abandoned)) return
+    if (retry && (!navigator.onLine || typeof limitsRef.current !== 'number' ||
+      tasksRef.current.some(item => item.sendId !== task.sendId && item.unresolved))) return
+    if (!uncertain(task) && tasksRef.current.filter(item => item.pending || uncertain(item)).length >= 3) return
     const version = epoch.current
-    patch(task.sendId, { status: '正在查询发送结果…', pending: true })
+    patch(task.sendId, { status: '正在查询发送结果…', pending: true, unresolved: uncertain(task) || task.unresolved })
     const controller = new AbortController()
-    control.current = controller
+    controls.current.set(task.sendId, controller)
     const timer = window.setTimeout(() => controller.abort(), 15000)
     try {
       const response = await fetch(`/api/file-sends/${task.sendId}`, { credentials: 'same-origin', cache: 'no-store', signal: controller.signal })
-      if (version !== epoch.current || !live.current || tasksRef.current.find(item => item.sendId === task.sendId)?.stopping) return
+      if (controller.signal.aborted || version !== epoch.current || !live.current || tasksRef.current.find(item => item.sendId === task.sendId)?.stopping) return
       if (response.headers.has('x-filehop-access-layer')) throw Error()
       const value = await response.json()
-      if (version !== epoch.current || !live.current || tasksRef.current.find(item => item.sendId === task.sendId)?.stopping) return
+      if (controller.signal.aborted || version !== epoch.current || !live.current || tasksRef.current.find(item => item.sendId === task.sendId)?.stopping) return
       if (response.status === 401 && value.code === 'session_invalid') { expired.current(); return }
       if (response.status === 404 && retry && !task.previousAttemptId && !task.stopRequested) {
         await replayFirst(task, version, controller)
@@ -239,8 +290,15 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
       if (value.state === 'cleaning' && value.stop_requested === true) {
         patch(task.sendId, { status: '已停止；如有残留，清理完成前仍占额度。', pending: false, stopRequested: false }); return
       }
+      if (value.state === 'cleaning') {
+        // 服务端已裁决不提交，因此释放页面名额；残留仍占服务器额度，重试仍须先查询清理结果。
+        patch(task.sendId, { status: '上传失败，清理未完成，空间尚未释放；可稍后查询。', pending: false })
+        return
+      }
       if (value.state !== 'failed') {
-        patch(task.sendId, { status: value.state === 'cleaning' ? pendingCleanup : '结果未确认：服务器仍在接收或处理；请稍后查询，不会启动第二次写入。', pending: false })
+        if (value.state !== 'prepared' && value.state !== 'writing') throw Error()
+        // 已确认仍活动只占一个名额，不再阻塞其他空闲名额；查询失败才重新暂停整条队列。
+        patch(task.sendId, { status: '结果未确认：服务器仍在接收或处理；请稍后查询，不会启动第二次写入。', pending: false, unresolved: false })
         return
       }
       if (!retry || task.stopRequested) {
@@ -251,7 +309,7 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
       patch(task.sendId, { attemptId: next, previousAttemptId: task.attemptId })
       await startSuccessor({ ...task, attemptId: next }, task.attemptId, version, controller)
     } catch { if (version === epoch.current && live.current && !tasksRef.current.find(item => item.sendId === task.sendId)?.stopping) patch(task.sendId, { status: unknown, pending: false }) }
-    finally { window.clearTimeout(timer); if (control.current === controller) control.current = null }
+    finally { window.clearTimeout(timer); if (controls.current.get(task.sendId) === controller) controls.current.delete(task.sendId) }
   }
   async function replayFirst(task: Task, version: number, controller: AbortController) {
     // 准备响应丢失后仍重放最初的尝试身份；服务器已有准备就继续上传，不创建后继。
@@ -306,11 +364,11 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
   // abort 仅停止本页发数据；服务端停止与成功由独立的持久裁决决定。
   async function stop(sendId: string) {
     const task = tasksRef.current.find(item => item.sendId === sendId)
-    if (!task || task.stopping || task.status === '上传成功' ||
+    if (!live.current || !task || (!task.pending && !uncertain(task)) || task.queued || task.stopping || task.status === '上传成功' ||
       task.status.startsWith('已停止') || task.status.startsWith('上传失败') || task.status.startsWith('上传被拒绝') || task.status.startsWith('文件超过') || task.status.startsWith('文件元数据')) return
     patch(sendId, { stopping: true, stopRequested: true, pending: true, status: '正在请求停止…' })
-    xhr.current?.abort()
-    control.current?.abort()
+    xhr.current.get(sendId)?.abort()
+    controls.current.get(sendId)?.abort()
     const version = epoch.current
     try {
       const response = await fetch(`/api/file-sends/${sendId}/attempts/${task.attemptId}/stop`, {
@@ -358,8 +416,8 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
       return version === epoch.current && live.current ? '无法确认下载请求，请检查网络后重试。' : ''
     }
   }
-  return { tasks, limits, refresh, choose, query, retry, stop, abandon, download, suspend, reset,
-    busy: tasks.some(task => task.pending || uncertain(task)),
+  return { tasks, limits, refresh, choose, remove, query, retry, stop, abandon, download, suspend, reset,
+    paused: !online || tasks.some(task => task.unresolved),
     waiting: tasks.filter(task => task.abandoned && (task.pending || uncertain(task))).length,
-    hasUnsaved: () => tasksRef.current.some(task => task.pending || uncertain(task)) }
+    hasUnsaved: () => tasksRef.current.some(task => task.queued || task.pending || uncertain(task)) }
 }
