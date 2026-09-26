@@ -124,9 +124,13 @@ fn router_inner(database: PathBuf, files: PathBuf, config: Config, recovered: bo
                     &maintenance.database.join("transfer.db"),
                 ))
                 .await?;
-                crate::files::reconcile(&maintenance, &mut db)
-                    .await
-                    .map_err(|_| sqlx::Error::RowNotFound)
+                let uploads = crate::files::reconcile(&maintenance, &mut db).await;
+                let deletions = crate::files::cleanup_deleted_files(&maintenance, &mut db).await;
+                if uploads.is_ok() && deletions {
+                    Ok(())
+                } else {
+                    Err(sqlx::Error::RowNotFound)
+                }
             }
             .await;
             delay = if result.is_ok() {
@@ -159,7 +163,10 @@ fn router_inner(database: PathBuf, files: PathBuf, config: Config, recovered: bo
         )
         .route("/api/storage", get(crate::files::storage))
         .route("/api/files", get(crate::messages::files))
-        .route("/api/files/{file_id}", get(crate::files::download))
+        .route(
+            "/api/files/{file_id}",
+            get(crate::files::download).delete(crate::files::delete),
+        )
         .route("/api/files/{file_id}/status", get(crate::files::status))
         .route(
             "/api/files/status-query",
