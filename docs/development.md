@@ -55,6 +55,22 @@ Web 两个入口共用页面内删除上下文：请求未接受前显示请求�
 
 状态字段同样整理在尚未冻结的 `0001_next_release.sql` 中；本次不提供已有旧开发库的升级入口，不得用清库或重写 checksum 宣称升级成功。需保留数据的实例不能直接更新，须等待独立升级路径。测试仅初始化新的隔离合成实例，未操作任何既有数据目录。
 
+### 服务器文件管理复验入口
+
+此表只导航长期复验入口，不是当前版本的通过记录。阶段结论在 Issue／PR／CI 中绑定实际提交，不能用子任务关闭替代通过；原生认证随 Spec 005 补验。
+
+| Spec 003 验收 | 主要自动化入口 | 验证边界 |
+| --- | --- | --- |
+| M01–M02 | `files.rs`、`deletion.ts`、`deletion-ordering.spec.ts` | 真实分页及删除后的历史保留、双入口、本地下载副本不变 |
+| M03–M05 | `files.rs`、`files_process.rs` | 活动读取冲突、HEAD、真实 TCP 竞争／断连、下载无进展期限；已打开后截短合成实体导致读取失败，释放真实句柄后允许主动删除 |
+| M06–M07 | `deletion.ts`、`files_failure.rs` | 未知 DELETE 只查询、冲突后不自动删除、清理故障保留占用并后台恢复；浏览器冲突注入不是 TCP 竞争证据 |
+| M08 | `files_process.rs` | 持久接受后及实体已删除但最终事务失败时 SIGKILL，重启清理与重复重启不重复释放 |
+| M09–M10 | `files.rs`、`files_failure.rs`、`server-files.ts`、`deletion.ts` | 互斥容量分类、并发准入、异常实体及全局存储故障不误释放；列表查询不承诺实时探测磁盘 |
+| M11–M12 | `server-files.ts`、`deletion.ts`、`files.rs`、`files_process.rs` | 导航／认证恢复、状态校正、删除后发送身份重放 |
+| M13–M14 | `files.rs`、`server-files.ts`、`deletion.ts`、`deletion-ordering.spec.ts` | Web Cookie／Origin／受管标识、版本及容量乱序、退出隔离；不包含原生凭证 |
+
+下载资源参数见下方单文件后端配置；`files.rs` 验证有界下载槽位及无进展超时，`files_process.rs` 的显式 `bounded_memory` 测试比较不同文件大小和并发的进程内存。清理退避及恢复见上方删除协议与 `files_failure.rs`／`files_process.rs`；这些隔离测试不验证生产磁盘或共享代理预算。人工复验须补充最新稳定版桌面 Chrome 的真实后端列表／分页、下载、确认文案、清理与容量反馈、导航和认证恢复，并私下保存实际运行版本与环境信息。最终验收版本不明或任一适用项目缺证时保持待验收，不宣告完整阶段 2 完成。
+
 ## 工具链与本地检查
 
 测试使用 Rust / Playwright / Bash，见[测试规范](testing.md)，不需要 Python。Bash 在 Linux 宿主机或 CI runner 上编排，需具备 Node、Cargo、Docker、curl 及标准 GNU 工具；不要求应用镜像提供这些宿主工具。
