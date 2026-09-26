@@ -71,6 +71,8 @@ bash tests/compose_smoke.sh
 bash tests/web_container_smoke.sh
 ```
 
+如本机已有同名镜像，使用本次验证专属标签构建，并通过 `FILEHOP_BACKEND_IMAGE`、`FILEHOP_WEB_IMAGE` 指定给冒烟脚本；未设置时沿用上例标签。验证后仅删除本次专属标签，不覆盖或清理已有镜像。
+
 前端冒烟验证根目录及嵌套 `.env*` 文件不进入构建上下文，并以非 root 用户、实际开发只读挂载启动 Vite，检查 HTML 与源码转换响应；不发布端口。
 
 后端冒烟验证未初始化容器重建不创建数据、Compose 内隐藏输入初始化，并在正常重启、SIGKILL 后启动及保留挂载重建后，通过实际容器的 HTTP API 验证消息、发送标识、有效登录和固定到期时间保留，同标识重放不重复。探测使用已构建 Web 镜像中的 Node，共享该测试容器的网络命名空间，不发布端口、不加入共享网络，也不向应用镜像安装工具。两个镜像均须从待验收提交构建，不能拿旧镜像的结果证明新提交。
@@ -111,16 +113,24 @@ bash scripts/dev.sh /srv/filehop-dev host stop
 
 `.github/workflows/check.yml` 保留单个 `initialization` job，在 GitHub 托管 runner 上按事件选择检查范围：
 
-| 事件 | 基础检查 | 镜像构建与容器冒烟 |
-| --- | --- | --- |
-| 普通 PR → dev | 运行 | 默认跳过；下述风险路径变化时运行 |
-| dev → main 发布 PR | 运行 | 始终运行 |
-| push → dev/main（包括合并后） | 运行 | 跳过 |
-| Actions 手动运行（workflow_dispatch） | 运行 | 始终运行 |
+| 事件 | 基础应用检查 | 隔离 HTTPS 入口 | 镜像构建与容器冒烟 |
+| --- | --- | --- | --- |
+| 纯文档 PR → dev（严格白名单） | 跳过 | 跳过 | 跳过 |
+| 其他 PR → dev | 运行 | 相关风险路径变化时运行 | 相关风险路径变化时运行 |
+| dev → main 发布 PR | 运行 | 始终运行 | 始终运行 |
+| push → dev/main（包括合并后） | 运行 | 跳过 | 跳过 |
+| Actions 手动运行（workflow_dispatch） | 运行 | 始终运行 | 始终运行 |
 
-基础检查包含 Rust fmt/Clippy/测试/构建、Web lint/TypeScript/构建、真实后端浏览器冒烟、隔离 HTTPS 入口测试、Shell 语法和 Compose 配置校验，不因普通业务代码所属目录而省略。
+基础应用检查包含 Rust fmt/Clippy/测试/有限内存回归/构建、Web lint/TypeScript/构建、原有完整真实后端浏览器回归、Shell 语法和 Compose 配置校验，不因普通业务代码所属目录而省略。Rust 静态检查、集成测试、资源回归、构建，以及 Web 安装、构建、浏览器安装分别计时。隔离 HTTPS 与容器检查属于运行环境验证，不是生产发布。
 
-开发 PR 使用 base/head 的 merge-base 差异检查整个 PR，而非仅最后一次提交；关闭重命名检测以同时覆盖旧路径删除和新路径添加。以下变化会增加完整容器检查：`deploy/`、`scripts/`、`.github/`、`tests/`、Docker 忽略规则及示例环境文件、Node/Rust 工具链、Cargo manifest/锁文件/配置/build.rs/迁移、前端包管理 manifest/锁文件/配置/补丁，以及 Web 构建配置与 HTML 入口。精确路径以 workflow 的 `case` 规则为准；新增构建输入时同步维护规则。
+检查范围由 `scripts/ci-scope.sh` 决定。开发 PR 使用 base/head 的 merge-base 差异检查整个 PR，而非仅最后一次提交；关闭重命名检测以同时覆盖旧路径删除和新路径添加。分类失败直接使 job 失败，空差异保守执行应用检查。所有运行（包括纯文档 PR）都执行 `bash tests/ci_scope.sh`，通过临时 Git 仓库验证事件、整个 PR、删除、重命名及无效输入边界；不使用顶层 paths-ignore 跳过必需检查。保留 `initialization` job 名称和默认失败传播，不增加 always-success 汇总或 continue-on-error；必需步骤失败或运行取消不会变成合法跳过。workflow 未改变 GitHub 保护规则，实际门禁设置仍须另行核实。
+
+- 纯文档白名单仅包含根目录 `README.md`、`CONTEXT.md`、`CONTRIBUTING.md`、`AGENTS.md`、`LICENSE`，`docs/` 下 Markdown 和 PR 描述模板。必须整个差异都在白名单内；未知路径和混合源码变更执行应用检查。发布 PR、push 和手动完整检查不使用文档豁免；PR 来源策略不变。若文档未来成为构建输入，必须同步移出白名单。
+- Docker 忽略规则、Rust 工具链、Cargo manifest/锁文件/配置/build.rs/迁移、容器初始化使用的 `backend/tests/initialization.rs` 及 `backend/tests/support/`、前端包管理输入和构建配置变化增加容器检查。
+- Caddy 配置、服务描述和 `tests/caddy_ingress.*` 变化增加入口检查，不因仅改入口而构建应用镜像。其他 `deploy/` 配置（包括网络/Compose）变化执行两类环境检查。
+- `scripts/`、未知 `.github/` 或 `tests/` 编排、Node 工具链和示例环境变化保守执行两类环境检查。已核对独立的 `tests/browser.sh`、`tests/browser.mjs`、`tests/text-cases.json`、`tests/dev_script.sh` 和 PR 来源策略 workflow 只执行应用检查，不额外构建镜像。`tests/persistence.mjs` 等容器共享输入仍执行环境检查。
+
+精确规则维护在上述分类脚本；新增共享依赖或构建输入时同步维护规则和回归用例。Caddy 仍验证认证、头处理、路由和超过 15 秒的传输，不缩短测试来制造提速。
 
 普通业务变化也可能产生容器特有问题；默认延迟到发布 PR 检查。有相关风险时，在 Actions 的 Application checks 中选择对应分支手动运行完整检查（手动入口需先存在于默认分支），不要把基础检查成功当作容器路径已验证。并发组按 workflow、事件类型和 ref 隔离，手动完整检查不会被同分支的 push 基础检查取消；同一事件类型与 ref 的新运行仍会取消旧运行。
 
@@ -138,7 +148,7 @@ bash scripts/dev.sh /srv/filehop-dev host stop
 
 dev/main 的 push 基础检查不构建镜像，因此不会刷新对应分支的 Docker 缓存；PR 写入的缓存也不会自动成为后续其他 PR 可复用的基分支缓存。依赖、工具链或基础镜像有较大更新后，如需改善后续 PR 的容器构建耗时，可在合入 dev 后选择 dev 手动运行一次完整检查，刷新其 Docker 缓存。这是可选的性能维护，不是正确性门槛；不为预热缓存恢复每次 push 的镜像构建。
 
-首次运行、依赖/工具链更新或缓存被淘汰后仍可能下载；缓存命中也仍执行安装与正确性检查。宿主 Cargo/pnpm 缓存与 Docker 构建缓存互不共享。后端 Dockerfile 目前源码改变会使 release 编译层失效，目前仅使用跨运行层缓存，尚未引入依赖预编译分层。Playwright 浏览器和 Linux 系统依赖暂不缓存。
+首次运行、依赖/工具链更新或缓存被淘汰后仍可能下载；缓存命中也仍执行安装与正确性检查。宿主 Cargo/pnpm 缓存与 Docker 构建缓存互不共享。后端 Dockerfile 在复制业务源码前，按固定 manifest/锁文件和当前隐式 lib/bin 目标编译依赖，再用 `cargo clean --release --package backend` 删除应用占位产物。业务源码或迁移变化只重新执行应用编译层；依赖层通过既有 BuildKit `mode=max` 跨运行复用，不依赖未导出的 cache mount。新增 Cargo target、build.rs、路径依赖或 workspace 时必须同步调整此层，不能把占位构建当作真实应用检查。冷缓存仍执行完整依赖和应用构建。Playwright 浏览器和 Linux 系统依赖暂不缓存；默认 headless Chromium 检查使用 `playwright install --with-deps --only-shell chromium`，不下载未使用的完整 Chrome。稳定版 Chrome 人工验收仍需单独安装对应浏览器，不受此优化替代。Caddy 仅在入口检查被选中时下载，仍执行固定 SHA-512 校验；不新增工具缓存。
 
 验证冷/热缓存时，选择会触发容器检查的 PR 首次运行与再次运行，或对同一提交手动运行两次完整检查：两次完整检查都应通过；第二次 pnpm/Cargo 步骤应报告缓存恢复，Docker 应出现缓存导入及适用层的 `CACHED`，且两个容器冒烟仍执行。需要强制冷缓存时，在临时测试分支更换缓存键前缀和 Docker scope，不删除共享缓存。实际命中率与耗时以对应运行日志为准，本地静态校验不能代替此验证。
 
