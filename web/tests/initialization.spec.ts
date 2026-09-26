@@ -10,6 +10,7 @@ import { verifySendRecovery } from './send-recovery'
 import { verifyFiles } from './files'
 import { verifyFileSession } from './file-session'
 import { verifyFileLogout } from './file-logout'
+import { verifyServerFiles } from './server-files'
 
 test('administrator initializes storage and the page observes the real status', async ({ page }) => {
   test.setTimeout(90_000)
@@ -89,6 +90,7 @@ test('administrator initializes storage and the page observes the real status', 
   await verifyFileSession(page)
   await verifyFileLogout(page)
   await verifyFiles(page)
+  await verifyServerFiles(page)
   await verifyLogout(page)
   writeFileSync(resolve(process.env.TEST_FILES!, 'storage-id'), 'mismatched')
   await page.reload()

@@ -29,6 +29,8 @@ struct Message {
     file_mime: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     file_state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    state_version: Option<String>,
 }
 
 // 固定采用 Spec 的 White_Space 集合，不依赖语言默认 trim；BOM 和零宽空格是合法正文。
@@ -121,7 +123,7 @@ pub(crate) async fn send(
             .bind(&input.send_id).bind(&input.text).bind(&input.source_label).execute(&mut *tx).await?.rows_affected() == 1;
         // 插入已获得 SQLite 写锁，随后检查文件发送身份；冲突时回滚刚插入的文本。
         if sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM file_send WHERE send_id=?").bind(&input.send_id).fetch_one(&mut *tx).await? != 0 { return Err(sqlx::Error::RowNotFound); }
-        let message = sqlx::query_as::<_, Message>("SELECT CAST(id AS TEXT) AS id, send_id, CASE WHEN kind='TEXT' THEN text END AS text, source_label, created_at, kind, file_id, file_name, file_size, file_mime, CASE WHEN kind='FILE' THEN 'available' END AS file_state FROM message WHERE send_id = ?")
+        let message = sqlx::query_as::<_, Message>(message_query!("WHERE send_id = ?"))
             .bind(&input.send_id).fetch_one(&mut *tx).await?;
         // 必须等提交成功才可返回成功；5xx 不保证未保存，客户端仍须保留原发送身份。
         tx.commit().await?;
@@ -176,13 +178,28 @@ pub(crate) async fn result(
 
 // 传输已在请求开始时认证。传输途中自然到期不应撤销刚提交的成功回执。
 pub(crate) async fn committed(connection: &mut sqlx::SqliteConnection, send_id: &str) -> Response {
-    match sqlx::query_as::<_, Message>("SELECT CAST(id AS TEXT) AS id, send_id, CASE WHEN kind='TEXT' THEN text END AS text, source_label, created_at, kind, file_id, file_name, file_size, file_mime, CASE WHEN kind='FILE' THEN 'available' END AS file_state FROM message WHERE send_id = ?")
-        .bind(send_id).fetch_optional(connection).await {
+    match sqlx::query_as::<_, Message>(message_query!("WHERE send_id = ?"))
+        .bind(send_id)
+        .fetch_optional(connection)
+        .await
+    {
         Ok(Some(message)) => json(StatusCode::OK, message),
-        Ok(None) => error(StatusCode::NOT_FOUND, "send_not_found", "暂未找到发送结果，不代表在途发送不会保存"),
+        Ok(None) => error(
+            StatusCode::NOT_FOUND,
+            "send_not_found",
+            "暂未找到发送结果，不代表在途发送不会保存",
+        ),
         Err(_) => unavailable(),
     }
 }
+
+// 所有消息读取共用投影，发送重放和历史不能各自编造文件状态。
+macro_rules! message_query {
+    ($tail:literal) => {
+        concat!("SELECT CAST(id AS TEXT) AS id, send_id, CASE WHEN kind='TEXT' THEN text END AS text, source_label, created_at, kind, file_id, file_name, file_size, file_mime, CASE WHEN kind='FILE' THEN file_state END AS file_state, CASE WHEN kind='FILE' THEN CAST(state_version AS TEXT) END AS state_version FROM message ", $tail)
+    };
+}
+use message_query;
 
 #[derive(Deserialize, Default)]
 #[serde(deny_unknown_fields)]
@@ -190,6 +207,55 @@ pub(crate) struct RecentQuery {
     limit: Option<u32>,
     before: Option<i64>,
     after: Option<i64>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct FilesQuery {
+    limit: Option<u32>,
+    before: Option<i64>,
+}
+
+pub(crate) async fn files(
+    State(service): State<Arc<Service>>,
+    headers: HeaderMap,
+    query: Result<Query<FilesQuery>, axum::extract::rejection::QueryRejection>,
+) -> Response {
+    let (mut connection, _) = match authenticate(&service, &headers).await {
+        Ok(c) => c,
+        Err(e) => return *e,
+    };
+    let q = match query {
+        Ok(Query(q))
+            if (1..=100).contains(&q.limit.unwrap_or(50)) && q.before.is_none_or(|id| id > 0) =>
+        {
+            q
+        }
+        _ => {
+            return error(
+                StatusCode::BAD_REQUEST,
+                "invalid_query",
+                "limit 须为 1–100，before 须为正整数消息 ID",
+            );
+        }
+    };
+    let limit = q.limit.unwrap_or(50) as usize;
+    // 消息只在文件提交成功后产生；排他 ID 游标不受新上传插入或将来删除影响。
+    // 多取一条在同一查询快照中判断后续页，不检查磁盘、不把未提交上传当作文件。
+    let result = sqlx::query_as::<_, Message>(message_query!("WHERE kind='FILE' AND file_state != 'deleted' AND (? IS NULL OR message.id < ?) ORDER BY message.id DESC LIMIT ?"))
+        .bind(q.before).bind(q.before).bind((limit + 1) as i64).fetch_all(&mut connection).await;
+    match result {
+        Ok(mut files) => {
+            let has_more = files.len() > limit;
+            files.truncate(limit);
+            let before = files.last().map(|m| m.id.clone());
+            json(
+                StatusCode::OK,
+                serde_json::json!({"files": files, "before": before, "has_more": has_more}),
+            )
+        }
+        Err(_) => unavailable(),
+    }
 }
 
 pub(crate) async fn recent(
@@ -223,35 +289,51 @@ pub(crate) async fn recent(
         let mut tx = connection.begin().await?;
         // 增量从边界后最早记录开始，不能取最近页，否则离线期间超过一页的消息会永久遗漏。
         if let Some(after) = after {
-            let mut messages = sqlx::query_as::<_, Message>("SELECT CAST(id AS TEXT) AS id, send_id, CASE WHEN kind='TEXT' THEN text END AS text, source_label, created_at, kind, file_id, file_name, file_size, file_mime, CASE WHEN kind='FILE' THEN 'available' END AS file_state FROM message WHERE id > ? ORDER BY message.id ASC LIMIT ?")
-                .bind(after).bind(limit + 1).fetch_all(&mut *tx).await?;
+            let mut messages = sqlx::query_as::<_, Message>(message_query!(
+                "WHERE id > ? ORDER BY message.id ASC LIMIT ?"
+            ))
+            .bind(after)
+            .bind(limit + 1)
+            .fetch_all(&mut *tx)
+            .await?;
             let has_more = messages.len() > limit as usize;
             messages.truncate(limit as usize);
             let after = messages.last().map(|m| m.id.clone());
             tx.commit().await?;
             return Ok(serde_json::json!({"messages":messages,"after":after,"has_more":has_more}));
         }
-        let cursor: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) FROM message").fetch_one(&mut *tx).await?;
+        let cursor: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) FROM message")
+            .fetch_one(&mut *tx)
+            .await?;
         // 历史从排他边界向前取最近一页，多取一条判断是否还有旧记录；新增消息不会挤动旧页。
         let mut messages = if let Some(before) = boundary {
-            sqlx::query_as::<_, Message>("SELECT CAST(id AS TEXT) AS id, send_id, CASE WHEN kind='TEXT' THEN text END AS text, source_label, created_at, kind, file_id, file_name, file_size, file_mime, CASE WHEN kind='FILE' THEN 'available' END AS file_state FROM message WHERE id < ? ORDER BY message.id DESC LIMIT ?")
-                .bind(before).bind(limit + 1).fetch_all(&mut *tx).await?
+            sqlx::query_as::<_, Message>(message_query!(
+                "WHERE id < ? ORDER BY message.id DESC LIMIT ?"
+            ))
+            .bind(before)
+            .bind(limit + 1)
+            .fetch_all(&mut *tx)
+            .await?
         } else {
-            sqlx::query_as::<_, Message>("SELECT CAST(id AS TEXT) AS id, send_id, CASE WHEN kind='TEXT' THEN text END AS text, source_label, created_at, kind, file_id, file_name, file_size, file_mime, CASE WHEN kind='FILE' THEN 'available' END AS file_state FROM message ORDER BY message.id DESC LIMIT ?")
-                .bind(limit + 1).fetch_all(&mut *tx).await?
+            sqlx::query_as::<_, Message>(message_query!("ORDER BY message.id DESC LIMIT ?"))
+                .bind(limit + 1)
+                .fetch_all(&mut *tx)
+                .await?
         };
         let has_older = messages.len() > limit as usize;
         messages.truncate(limit as usize);
         messages.reverse();
         let before = messages.first().map(|m| m.id.clone());
         tx.commit().await?;
-        let mut page = serde_json::json!({"messages":messages,"before":before,"has_older":has_older});
+        let mut page =
+            serde_json::json!({"messages":messages,"before":before,"has_older":has_older});
         // 只有首次快照建立新增读取基线；旧页不提供可误用为新增进度的游标。
         if boundary.is_none() {
             page["sync_cursor"] = cursor.to_string().into();
         }
         Ok(page)
-    }.await;
+    }
+    .await;
     match result {
         Ok(value) => json(StatusCode::OK, value),
         Err(_) => unavailable(),
