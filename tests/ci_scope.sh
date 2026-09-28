@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Exercise event + whole-PR diff -> scope through the public CLI in an isolated repo.
+# Verify the public event/diff -> scope CLI using an isolated synthetic repository.
 set -euo pipefail
 for tool in git mktemp realpath; do command -v "$tool" >/dev/null || { echo "Missing $tool" >&2; exit 1; }; done
 script=$(realpath "$(dirname "$0")/../scripts/ci-scope.sh")
@@ -21,7 +21,7 @@ assert_scope() {
   expected=$(printf 'application=%s\ncontainers=%s\ningress=%s' "$1" "$2" "$3")
   shift 3
   actual=$(bash "$script" "$@")
-  [[ "$actual" == "$expected" ]] || { printf 'Scope mismatch for %s\nExpected:\n%s\nActual:\n%s\n' "$*" "$expected" "$actual" >&2; exit 1; }
+  [[ "$actual" == "$expected" ]] || { printf 'Scope mismatch: %s\nExpected:\n%s\nActual:\n%s\n' "$*" "$expected" "$actual" >&2; exit 1; }
 }
 check_path() {
   local path=$1
@@ -29,39 +29,27 @@ check_path() {
   git checkout -q --detach "$base"
   mkdir -p "$(dirname "$path")"
   printf 'synthetic\n' > "$path"
-  git add -- "$path"
-  git commit -qm fixture
+  git add -- "$path"; git commit -qm fixture
   assert_scope "$@" pull_request dev "$base" HEAD
 }
 for path in README.md docs/testing.md docs/specs/004-web-production-deployment.md .github/pull_request_template.md; do
   check_path "$path" false false false
 done
-for path in backend/src/main.rs web/src/App.tsx tests/browser.sh tests/browser.mjs tests/text-cases.json tests/dev_script.sh .github/workflows/pr-policy.yml unknown.md; do
+# No special build-input routing: release/manual runs exercise those environments.
+for path in backend/src/main.rs web/src/App.tsx deploy/compose.dev.yml deploy/compose.production.yml web/tests/production.test.ts tests/production_smoke.sh scripts/ci-scope.sh .github/workflows/check.yml unknown.md; do
   check_path "$path" true false false
 done
-for path in deploy/caddy-dev.routes deploy/Caddyfile.host deploy/filehop-caddy.service tests/caddy_ingress.mjs; do
-  check_path "$path" true false true
-done
-for path in backend/Cargo.lock backend/tests/initialization.rs backend/tests/support/mod.rs web/package.json web/vite.config.ts .dockerignore; do
-  check_path "$path" true true false
-done
-for path in deploy/compose.host.yml deploy/compose.production.yml deploy/caddy-production.routes deploy/web-production.Dockerfile web/tests/production.test.ts web/playwright.config.ts tests/production_smoke.sh tests/production_ingress.mjs scripts/ci-scope.sh .github/workflows/check.yml tests/persistence.mjs tests/compose_smoke.sh tests/new-fixture.mjs; do
-  check_path "$path" true true true
-done
-# Multiple commits: a later docs change must not hide an earlier risky change.
-printf 'docs\n' > README.md
-git add README.md; git commit -qm docs
-assert_scope true true true pull_request dev "$base" HEAD
-# Rename away from a watched input and delete it: old paths still count.
-check_path deploy/caddy-dev.routes true false true
+printf 'docs\n' > README.md; git add README.md; git commit -qm docs
+assert_scope true false false pull_request dev "$base" HEAD
+# Rename and deletion must not become a documentation-only exemption.
+check_path deploy/caddy-dev.routes true false false
 before=$(git rev-parse HEAD)
-git mv deploy/caddy-dev.routes README.md
-git commit -qm rename
-assert_scope true false true pull_request dev "$before" HEAD
+git mv deploy/caddy-dev.routes README.md; git commit -qm rename
+assert_scope true false false pull_request dev "$before" HEAD
 git checkout -q --detach "$before"
 git rm -q deploy/caddy-dev.routes; git commit -qm delete
-assert_scope true false true pull_request dev "$before" HEAD
-# Base-only changes are excluded by merge-base comparison.
+assert_scope true false false pull_request dev "$before" HEAD
+# Exclude base-only changes via merge-base.
 git checkout -q --detach "$base"
 printf 'docs\n' > README.md; git add README.md; git commit -qm head-docs
 head=$(git rev-parse HEAD)
@@ -70,9 +58,10 @@ mkdir -p deploy; printf 'base-only\n' > deploy/compose.dev.yml
 git add deploy; git commit -qm base-only
 assert_scope false false false pull_request dev HEAD "$head"
 assert_scope true false false pull_request dev "$base" "$base"
-assert_scope true false false push ''
 assert_scope true true true pull_request main
 assert_scope true true true workflow_dispatch ''
 if bash "$script" pull_request dev invalid HEAD >/dev/null 2>&1; then echo 'Invalid diff accepted' >&2; exit 1; fi
-if bash "$script" unknown '' >/dev/null 2>&1; then echo 'Invalid event accepted' >&2; exit 1; fi
+for event in push unknown; do
+  if bash "$script" "$event" '' >/dev/null 2>&1; then echo 'Unsupported event accepted' >&2; exit 1; fi
+done
 echo 'CI scope event, whole-PR diff, rename, deletion and fail-closed checks passed.'
