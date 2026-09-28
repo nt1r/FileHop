@@ -147,20 +147,12 @@ fn router_inner(database: PathBuf, files: PathBuf, config: Config, recovered: bo
         .route("/api/transfer-limits", get(crate::files::limits))
         .route("/api/file-sends/{send_id}", get(crate::files::send_status))
         .route(
-            "/api/file-sends/{send_id}/attempts",
-            axum::routing::post(crate::files::successor),
-        )
-        .route(
             "/api/file-sends",
             axum::routing::post(crate::files::prepare),
         )
         .route(
             "/api/file-sends/{send_id}/attempts/{attempt_id}/content",
             axum::routing::put(crate::files::content),
-        )
-        .route(
-            "/api/file-sends/{send_id}/attempts/{attempt_id}/stop",
-            axum::routing::post(crate::files::stop),
         )
         .route("/api/storage", get(crate::files::storage))
         .route("/api/files", get(crate::messages::files))

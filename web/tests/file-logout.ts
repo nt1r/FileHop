@@ -20,12 +20,12 @@ export async function verifyFileLogout(page: Page) {
     await route.continue()
   })
   await page.locator('input[type="file"]').setInputFiles(names.map(name => ({ name, mimeType: 'text/plain', buffer: Buffer.from(name) })))
-  await expect.poll(() => started.length).toBe(3)
+  await expect.poll(() => started.length).toBe(1)
   await expect(page.locator('.upload-task').filter({ hasText: names[3] })).toContainText('等待上传')
-  // 同源另一页发起退出也必须清空本页并尽力停止；无须在每个标签页再次确认。
+  // 同源退出只中断本地请求并清空页面，不调用服务器停止；旧成功仍允许出现在历史。
   await other.getByRole('button', { name: '退出登录' }).click()
   await expect(page.getByRole('region', { name: '消息流' })).toHaveCount(0)
-  await expect.poll(() => stopped.length).toBe(3)
+  expect(stopped).toHaveLength(0)
   await expect(page.getByRole('button', { name: '登录', exact: true })).toBeVisible()
   await page.getByLabel('用户名').fill('Admin')
   await page.getByLabel('密码', { exact: true }).fill(' synthetic password ')
@@ -36,6 +36,7 @@ export async function verifyFileLogout(page: Page) {
   await page.unrouteAll({ behavior: 'wait' })
   await expect(page.locator('.upload-task')).toHaveCount(0)
   await expect(page.getByText(names[3], { exact: false })).toHaveCount(0)
-  expect(started).toEqual(names.slice(0, 3))
+  expect(started).toEqual(names.slice(0, 1))
+  expect(stopped).toHaveLength(0)
   await other.close()
 }
