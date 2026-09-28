@@ -25,6 +25,9 @@ enum Command {
     /// 独立迁移已有实例；必须先停止使用相同存储的后端。
     Migrate,
     Serve {
+        /// 仅在已有存储身份合法时监听，供生产启动使用。
+        #[arg(long)]
+        require_initialized: bool,
         #[arg(long, default_value = "0.0.0.0:8080")]
         listen: SocketAddr,
         #[arg(
@@ -93,6 +96,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             println!("Password reset completed; all sessions revoked.");
         }
         Command::Serve {
+            require_initialized,
             listen,
             origin,
             trusted_proxy,
@@ -138,7 +142,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 total_timeout: std::time::Duration::from_secs(upload_total_secs),
                 download_idle_timeout: std::time::Duration::from_secs(download_idle_secs),
             };
-            // 已初始化先锁定并恢复；空目录仅提供诊断，在线初始化后同样遵守此顺序。
+            // 未初始化仍可监听诊断；认证接口独立检查存储，不创建替代实例。
+            let status = backend::storage::inspect(&cli.database_dir, &cli.files_dir).await;
+            eprintln!("storage_status={}", serde_json::to_string(&status)?);
+            // 生产只能使用操作者显式初始化的实例；空挂载也不能伪装成首次安装。
+            // 开发仍可监听未初始化诊断，两个模式都绝不自动创建数据库或账户。
+            if require_initialized && !matches!(status, backend::storage::Status::Initialized) {
+                return Err(
+                    "initialized storage required; verify mounts before explicit init".into(),
+                );
+            }
+            // 已初始化先锁定并恢复；开发空目录仅提供诊断，在线初始化后同样遵守此顺序。
+            // managed_app 统一持有锁并完成恢复，不能在此重复加锁或再启动第二个恢复者。
             let app = backend::managed_app(
                 cli.database_dir,
                 cli.files_dir,

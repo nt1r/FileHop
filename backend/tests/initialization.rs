@@ -91,6 +91,36 @@ async fn fresh_start_never_creates_storage() {
     i.empty();
 }
 
+#[test]
+fn production_start_requires_initialized_storage_without_creating_replacement() {
+    let i = Instance::new();
+    // 超时让旧版本（仍会监听诊断）明确失败，而不是挂住整个测试进程。
+    let run = || {
+        Command::new("timeout")
+            .arg("5")
+            .arg(env!("CARGO_BIN_EXE_backend"))
+            .args(i.args())
+            .args(["serve", "--require-initialized", "--listen", "127.0.0.1:0"])
+            .output()
+            .unwrap()
+    };
+    let result = run();
+    assert_eq!(result.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&result.stderr).contains("initialized storage required"));
+    i.empty();
+    i.initialize();
+    fs::write(i.files.join("storage-id"), "wrong-instance").unwrap();
+    let before = fs::read(i.database.join("transfer.db")).unwrap();
+    let result = run();
+    assert_eq!(result.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&result.stderr).contains("initialized storage required"));
+    assert_eq!(fs::read(i.database.join("transfer.db")).unwrap(), before);
+    assert_eq!(
+        fs::read_to_string(i.files.join("storage-id")).unwrap(),
+        "wrong-instance"
+    );
+}
+
 #[tokio::test]
 async fn terminal_initialization_and_repeated_status_preserve_instance() {
     let i = Instance::new();
