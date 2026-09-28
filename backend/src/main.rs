@@ -23,6 +23,9 @@ enum Command {
     },
     ResetPassword,
     Serve {
+        /// 仅在已有存储身份合法时监听，供生产启动使用。
+        #[arg(long)]
+        require_initialized: bool,
         #[arg(long, default_value = "0.0.0.0:8080")]
         listen: SocketAddr,
         #[arg(
@@ -85,6 +88,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             println!("Password reset completed; all sessions revoked.");
         }
         Command::Serve {
+            require_initialized,
             listen,
             origin,
             trusted_proxy,
@@ -133,6 +137,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             // 未初始化仍可监听诊断；认证接口独立检查存储，不创建替代实例。
             let status = backend::storage::inspect(&cli.database_dir, &cli.files_dir).await;
             eprintln!("storage_status={}", serde_json::to_string(&status)?);
+            // 生产只能使用操作者显式初始化的实例；空挂载也不能伪装成首次安装。
+            // 开发仍可监听未初始化诊断，两个模式都绝不自动创建数据库或账户。
+            if require_initialized && !matches!(status, backend::storage::Status::Initialized) {
+                return Err(
+                    "initialized storage required; verify mounts before explicit init".into(),
+                );
+            }
             // 活动读取只在单进程内协调，必须在恢复前排除另一后端。
             // 锁既有身份文件而非创建锁文件；未初始化诊断不创建任何数据。
             let _instance_locks = if matches!(status, backend::storage::Status::Initialized) {
