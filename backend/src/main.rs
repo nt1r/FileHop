@@ -22,6 +22,8 @@ enum Command {
         confirm_paths: bool,
     },
     ResetPassword,
+    /// 独立迁移已有实例；必须先停止使用相同存储的后端。
+    Migrate,
     Serve {
         #[arg(long, default_value = "0.0.0.0:8080")]
         listen: SocketAddr,
@@ -73,6 +75,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             backend::storage::initialize(&cli.database_dir, &cli.files_dir, &username, &password)
                 .await?;
             println!("Initialization completed.");
+        }
+        Command::Migrate => {
+            backend::storage::migrate(&cli.database_dir, &cli.files_dir)
+                .await
+                .map_err(|error| format!("migration failed: {error}; preserve storage, keep maintenance enabled and inspect manually; no automatic retry"))?;
+            println!("Migration completed.");
         }
         Command::ResetPassword => {
             eprintln!(
@@ -130,28 +138,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 total_timeout: std::time::Duration::from_secs(upload_total_secs),
                 download_idle_timeout: std::time::Duration::from_secs(download_idle_secs),
             };
-            // 未初始化仍可监听诊断；认证接口独立检查存储，不创建替代实例。
-            let status = backend::storage::inspect(&cli.database_dir, &cli.files_dir).await;
-            eprintln!("storage_status={}", serde_json::to_string(&status)?);
-            // 活动读取只在单进程内协调，必须在恢复前排除另一后端。
-            // 锁既有身份文件而非创建锁文件；未初始化诊断不创建任何数据。
-            let _instance_locks = if matches!(status, backend::storage::Status::Initialized) {
-                let mut locks = Vec::new();
-                for directory in [&cli.database_dir, &cli.files_dir] {
-                    let file = std::fs::File::open(directory.join("storage-id"))?;
-                    fs2::FileExt::try_lock_exclusive(&file)
-                        .map_err(|_| "another backend is using this storage")?;
-                    locks.push(file);
-                }
-                locks
-            } else {
-                Vec::new()
-            };
-            // 上传恢复先于监听：尚未裁决的写入和残留不得与新预留并发。
-            backend::files_recover(&cli.database_dir, &cli.files_dir).await?;
-            let listener = tokio::net::TcpListener::bind(listen).await?;
-            println!("listening={}", listener.local_addr()?);
-            let app = backend::app_after_recovery(
+            // 已初始化先锁定并恢复；空目录仅提供诊断，在线初始化后同样遵守此顺序。
+            let app = backend::managed_app(
                 cli.database_dir,
                 cli.files_dir,
                 backend::session::Config {
@@ -160,7 +148,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     transfer,
                     ..Default::default()
                 },
-            );
+            )
+            .await?;
+            let listener = tokio::net::TcpListener::bind(listen).await?;
+            println!("listening={}", listener.local_addr()?);
             axum::serve(
                 listener,
                 app.into_make_service_with_connect_info::<SocketAddr>(),

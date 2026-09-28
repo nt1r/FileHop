@@ -97,7 +97,9 @@ https://localhost:${port} {
     assert.equal(JSON.parse(res.body).authorization, null)
     if (path.startsWith('/api/')) assert.equal(JSON.parse(res.body).clientIp, '127.0.0.1')
   }
-  assert.equal((await request('/internal/live', { authorization: auth })).status, 404)
+  for (const path of ['/internal/live', '/internal/ready']) {
+    assert.equal((await request(path, { authorization: auth })).status, 404)
+  }
   assert.equal((await request('/api/files/no-headers', { authorization: auth })).status, 504)
   // 独立 HTTPS 入口不能沿用 JSON 请求的 15 秒整体期限；上游逐块接收文件体。
   const streamed = new Promise((resolve, reject) => {

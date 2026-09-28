@@ -128,10 +128,54 @@ pub async fn initialize(
     result.map_err(|_| "initialization partially completed; preserve both directories and inspect them manually; no automatic cleanup performed".into())
 }
 
+// 后端与迁移共用既有身份文件锁；锁随进程退出释放，不删除或重建身份文件。
+// 两个目录都锁定，避免错误配对的实例同时访问其中一个存储目录。
+pub fn lock_instance(database: &Path, files: &Path) -> Result<Vec<File>> {
+    let mut locks = Vec::new();
+    for directory in [database, files] {
+        let file = OpenOptions::new()
+            .read(true)
+            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+            .open(directory.join(ID))?;
+        file.try_lock_exclusive()
+            .map_err(|_| "another backend or migration is using this storage")?;
+        locks.push(file);
+    }
+    Ok(locks)
+}
+
+pub async fn migrate(database: &Path, files: &Path) -> Result<()> {
+    let (database, files) = directories(database, files)?;
+    // 目录锁排除初始化和密码重置，身份锁兼容已经运行的后端。
+    // 先取得锁再验证身份；不能先运行 SQLx，否则缺失的库可能被误当成首次安装。
+    let db_lock = File::open(&database)?;
+    let files_lock = File::open(&files)?;
+    db_lock.try_lock_exclusive()?;
+    files_lock.try_lock_exclusive()?;
+    let _instance_locks = lock_instance(&database, &files)?;
+    validate_instance(&database, &files).await?;
+    let mut connection = SqliteConnection::connect_with(&options(&database.join(DATABASE))).await?;
+    // 已有受管实例必须保留迁移历史；缺失历史不能当作可重新执行的空库。
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations")
+        .fetch_one(&mut connection)
+        .await?;
+    if count == 0 {
+        return Err("migration history missing; preserve storage and inspect manually".into());
+    }
+    sqlx::migrate!("./migrations").run(&mut connection).await?;
+    connection.close().await?;
+    Ok(())
+}
+
 pub async fn reset_password(database: &Path, files: &Path, password: &str) -> Result<()> {
     if !(12..=128).contains(&password.chars().count()) {
         return Err("password must contain 12-128 Unicode code points".into());
     }
+    // 重置可以与正常服务并行，但不能跨越独立迁移的结构变更窗口。
+    let db_lock = File::open(database)?;
+    let files_lock = File::open(files)?;
+    FileExt::try_lock_shared(&db_lock)?;
+    FileExt::try_lock_shared(&files_lock)?;
     if !matches!(inspect(database, files).await, Status::Initialized) {
         return Err("storage unavailable; password unchanged".into());
     }
@@ -157,6 +201,27 @@ pub async fn reset_password(database: &Path, files: &Path, password: &str) -> Re
     Ok(())
 }
 
+pub(crate) async fn database_available(database: &Path) -> bool {
+    let result: Result<()> = async {
+        let path = database.join(DATABASE);
+        if !fs::symlink_metadata(&path)?.file_type().is_file() {
+            return Err("invalid database file".into());
+        }
+        let mut db = SqliteConnection::connect_with(
+            &SqliteConnectOptions::new().filename(path).read_only(true),
+        )
+        .await?;
+        // 读取实际业务表，而非与数据库结构无关的常量 SELECT 1。
+        sqlx::query("SELECT storage_id FROM instance WHERE singleton=1")
+            .fetch_one(&mut db)
+            .await?;
+        db.close().await?;
+        Ok(())
+    }
+    .await;
+    result.is_ok()
+}
+
 pub async fn inspect(database: &Path, files: &Path) -> Status {
     match inspect_inner(database, files).await {
         Ok(state) => state,
@@ -173,6 +238,11 @@ async fn inspect_inner(database: &Path, files: &Path) -> Result<Status> {
     if empty(&database)? && empty(&files)? {
         return Ok(Status::Uninitialized);
     }
+    validate_instance(&database, &files).await?;
+    Ok(Status::Initialized)
+}
+
+async fn validate_instance(database: &Path, files: &Path) -> Result<()> {
     // No create or migration on ordinary startup. Refuse symlinked required files.
     for path in [database.join(ID), files.join(ID), database.join(DATABASE)] {
         if !fs::symlink_metadata(path)?.file_type().is_file() {
@@ -188,8 +258,13 @@ async fn inspect_inner(database: &Path, files: &Path) -> Result<Status> {
     if fs::read_to_string(files.join(ID))? != id {
         return Err("storage identity mismatch".into());
     }
-    let mut connection =
-        SqliteConnection::connect_with(&options(&database.join(DATABASE)).read_only(true)).await?;
+    // 只读身份检查不切换日志模式；迁移前的检查不能先修改旧库配置。
+    let mut connection = SqliteConnection::connect_with(
+        &SqliteConnectOptions::new()
+            .filename(database.join(DATABASE))
+            .read_only(true),
+    )
+    .await?;
     let stored: String = sqlx::query_scalar("SELECT storage_id FROM instance WHERE singleton = 1")
         .fetch_one(&mut connection)
         .await?;
@@ -204,5 +279,5 @@ async fn inspect_inner(database: &Path, files: &Path) -> Result<Status> {
         return Err("invalid password hash".into());
     }
     connection.close().await?;
-    Ok(Status::Initialized)
+    Ok(())
 }
