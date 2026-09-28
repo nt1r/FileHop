@@ -1,0 +1,35 @@
+# 必须显式传入 --env-file、--project-directory、-p 与 -f，不复用开发默认值。
+name: ${FILEHOP_PROD_PROJECT:?Set a distinct production project}
+services:
+  backend:
+    image: ${FILEHOP_PROD_BACKEND_IMAGE:?Set the target backend image}
+    init: true
+    command: [serve, --require-initialized]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      FILEHOP_ORIGIN: ${FILEHOP_PROD_ORIGIN:?Set the exact production HTTPS origin}
+      FILEHOP_TRUSTED_PROXY: ${FILEHOP_PROD_TRUSTED_PROXY:?Set the exact controlled Caddy IP}
+    volumes:
+      - type: bind
+        source: ${FILEHOP_PROD_DATABASE_DIR:?Set the absolute database directory}
+        target: /data/database
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${FILEHOP_PROD_FILES_DIR:?Set the absolute files directory}
+        target: /data/files
+        bind:
+          create_host_path: false
+    networks:
+      ingress:
+        aliases: [filehop-prod-backend]
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+networks:
+  ingress:
+    external: true
+    name: ${FILEHOP_PROD_NETWORK:?Set the dedicated production ingress network}

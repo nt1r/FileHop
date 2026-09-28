@@ -1,0 +1,22 @@
+route {
+	# 生产不继承开发 Basic Auth，也不允许访问内部诊断接口。
+	handle /internal/* {
+		respond 404
+	}
+	handle /api/* {
+		reverse_proxy {$FILEHOP_PROD_BACKEND_UPSTREAM} {
+			header_up X-FileHop-Client-IP {remote_host}
+			transport http {
+				dial_timeout {$FILEHOP_PROXY_CONNECT_TIMEOUT:5s}
+				# 从请求体发送完后计时，不截断持续进展的附件传输。
+				response_header_timeout {$FILEHOP_PROXY_RESPONSE_HEADER_TIMEOUT:60s}
+			}
+		}
+	}
+	handle {
+		root * {$FILEHOP_PROD_WEB_ROOT}
+		# index 和不存在的资源不长期缓存；丢失的脚本返回 404，不能返回 HTML 冒充 JS。
+		header Cache-Control no-cache
+		file_server
+	}
+}

@@ -119,6 +119,57 @@ bash tests/web_container_smoke.sh
 
 测试容器使用调用者 UID/GID，数据库、文件目录和合成凭证仅在一次性目录内，结束后核对路径并清理；不代表生产部署、真实主机掉电、磁盘损坏恢复或文件持久化验收。
 
+## 隔离生产形态运行
+
+本节交付 Spec 004 的生产基础，不是正式部署、发布或更新工具。仅在一次性隔离环境使用；不自动修改共享入口、网络、DNS 或 GitHub 设置。GHCR 发布、版本清单、迁移、维护切换和详细就绪检查留给后续切片，不能拿此配置直接升级需要保留的旧实例。
+
+### 构建及一次性验证
+
+```bash
+docker build -f deploy/backend.Dockerfile -t filehop-isolated-backend .
+docker build -f deploy/web-production.Dockerfile -t filehop-isolated-static .
+FILEHOP_BACKEND_IMAGE=filehop-isolated-backend \
+FILEHOP_PROD_WEB_IMAGE=filehop-isolated-static bash tests/production_smoke.sh
+```
+
+需 Docker、Compose、Cargo、Node/pnpm、已安装的 Playwright Chromium、Caddy、OpenSSL 和 GNU 工具。使用本次专属镜像标签，勿覆盖既有部署镜像。CI 仅在 GitHub 托管 runner 构建和验证，不发布镜像、不连接 VPS。静态制品为 scratch 镜像，只有 `/web` 构建产物，没有 Node 或可运行服务；用 `docker create <image> /unused` 建立停止的提取容器，再 `docker cp <container>:/web/. <new-directory>`，最后移除该提取容器。镜像没有默认命令是有意设计，不用 `docker run` 提取。
+
+冒烟使用唯一 Compose 项目及两个专用 internal 网络、真实默认 UID/GID 10001、权限 0700 的一次性挂载；通过目标镜像 PTY 隐藏输入初始化。生产与开发测试栈使用不同账户和存储身份。入口仅绑定回环随机 HTTPS 端口，Caddy 使用本次生成的证书；Node 显式信任该证书，Chromium 仅豁免该证书公钥，不设置全局忽略 TLS 错误。该信任方式只服务隔离测试，不是公网证书方案。
+
+测试覆盖：静态资源实际提取和加载、缺失资源 404、生产无开发 Basic Auth、开发仍受保护、未认证拒绝、浏览器文本及附件往返、开发不能使用生产账户/Cookie、开发历史为空、后端及入口进程重建后原会话和消息/附件保留、缺失/空/错配挂载拒绝、默认运行身份及目录权限、无后端端口发布、实际日志驱动及轮转参数。入口为独立宿主进程且静态根目录与业务数据分离，不配置数据库或附件文件服务路径。测试不重复全部业务边界，不证明公网 ACME、真实到期续签、正式 Chrome 或实际生产部署通过。
+
+### 显式配置与操作约定
+
+`deploy/production.env.example` 是占位变量说明，实际配置保存在仓库外。项目名、镜像、精确 HTTPS Origin、代理 IP、专用网络名及两个**绝对**挂载路径均须显式填写，不能指向开发目录或共享开发网络。Compose 的路径插值不代替操作者核对绝对路径；当前还没有部署脚本替你校验全部配置。镜像须为此次审阅构建产物，未来正式发布按 digest 使用。
+
+`deploy/compose.production.yml` 仅运行后端，保持 `backend:8080`、`/data/database/transfer.db`、`/data/files`；入口使用唯一 `filehop-prod-backend:8080` 别名，开发使用 `filehop-dev-backend`。宿主入口须改用各专用网络的内部地址，不能依赖 Docker DNS；同步设置精确受信代理地址。生产不继承开发外层凭证。`deploy/caddy-production.routes` 使用 `FILEHOP_PROD_BACKEND_UPSTREAM` 与 `FILEHOP_PROD_WEB_ROOT`，后者只指向完整提取的静态版本目录，并由入口只读使用；容器入口只挂该目录，不挂数据库或上传目录。全局 443-only、TLS-ALPN-01 和共享入口操作边界仍见 [宿主入口指南](host-ingress.md)；本任务未应用这些设置。
+
+以已准备且确认可丢弃的隔离目录为例（所有路径和名称均为占位）：
+
+```bash
+# 先准备独立网络、配置和两个全新目录，由操作者设置 UID/GID 10001 可写。
+# 对首次安装，必须在启动服务之前通过目标镜像显式初始化。
+prod=(docker compose --env-file /srv/filehop-isolated/production.env \
+  --project-directory /srv/filehop-isolated -p filehop-isolated \
+  -f /srv/filehop-isolated/compose.production.yml)
+"${prod[@]}" config --quiet
+"${prod[@]}" run --rm backend init --username your_admin --confirm-paths
+"${prod[@]}" up -d --no-build
+"${prod[@]}" ps
+"${prod[@]}" logs --tail 100 backend
+"${prod[@]}" restart backend
+# 保留挂载重建；不是升级命令。
+"${prod[@]}" up -d --no-build --force-recreate
+# 重置密码撤销全部会话，不删除消息/文件。
+"${prod[@]}" exec backend filehop reset-password
+```
+
+不要在已有或损坏实例上重新 `init`。生产 `serve --require-initialized` 在监听前检查已有存储身份；空目录、部分初始化或身份错配均退出，不创建替代库；缺失 bind source 由 Compose 拒绝自动创建。开发 `serve` 仍允许安全的未初始化诊断。启动会先完成既有文件恢复再监听；`/internal/live` 仅表示存活，`/api/status` 仅表示存储初始化状态，二者都不能独立证明全部上传就绪。内部路径不经 Caddy 暴露。
+
+应用配置 `restart: unless-stopped`，异常退出由 Docker 重启，人工 stop 后保持停止；SIGTERM 最多等待 30 秒，届时仍未退出可被终止，未确认传输遵循原结果查询规则。**unhealthy 不等于自动重启**：Docker 重启策略响应进程退出，不响应健康标签；当前描述不伪造完整 healthcheck，后续内部就绪接口未交付前须验证状态与真实业务。错误挂载可能导致重启循环，应先停止、核对挂载与日志，不删除数据或反复初始化。
+
+后端 stdout/stderr 可通过 Compose logs 查询，json-file 每文件 10 MiB、最多 3 个文件，由 Docker 执行轮转；入口运行日志由独立入口服务管理，不随应用更新删除。冒烟核对实际日志配置及可查询启动日志，不通过灌满日志证明整个磁盘预算，也不记录正文、密码或 Cookie。静态 index 使用 `no-cache`，丢失脚本返回 404，不用 SPA fallback 掩盖不完整制品。数据仍为服务器明文存储，无备份恢复或自动回滚承诺；保留挂载只覆盖正常容器生命周期，不覆盖磁盘损坏。普通运行不执行删除数据卷的命令。
+
 ## 固定开发部署的管理入口
 
 长期运行的开发站点应使用固定目录中的源码快照或专用普通 clone，不从可删除的 linked worktree 部署。`web/src` 是运行中的只读 bind mount，删除宿主源码会导致页面模块加载失败；数据库和文件目录也不能随 worktree 清理。固定目录仍需由操作者保留，脚本无法防止运行期间的外部删除。
@@ -174,7 +225,7 @@ bash scripts/dev.sh /srv/filehop-dev host stop
 
 普通业务变化也可能产生容器特有问题；默认延迟到发布 PR 检查。有相关风险时，在 Actions 的 Application checks 中选择对应分支手动运行完整检查（手动入口需先存在于默认分支），不要把基础检查成功当作容器路径已验证。并发组按 workflow、事件类型和 ref 隔离，手动完整检查不会被同分支的 push 基础检查取消；同一事件类型与 ref 的新运行仍会取消旧运行。
 
-当前镜像仅加载到 runner 用于测试，不推送 GHCR、不部署；Web 镜像运行开发 Vite，不是生产静态制品。正式版本 tag 的 ARM64 构建与发布遵循 Spec 004，尚未实现。PR 来源策略仍由独立的 `.github/workflows/pr-policy.yml` 检查。
+当前镜像仅加载到 runner 用于测试，不推送 GHCR、不部署；开发 Web 镜像运行 Vite，独立的 `web-production.Dockerfile` 交付可提取静态制品。容器检查还运行生产形态 HTTPS 冒烟，因此选中容器检查时也准备 Caddy 并执行既有入口检查。正式版本 tag 的 ARM64 构建与发布遵循 Spec 004，尚未实现。PR 来源策略仍由独立的 `.github/workflows/pr-policy.yml` 检查。
 
 ## GitHub Actions 缓存
 
