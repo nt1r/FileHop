@@ -123,7 +123,7 @@ bash tests/web_container_smoke.sh
 
 ## 隔离生产形态运行
 
-本节交付 Spec 004 的生产基础，不是正式部署、发布或更新工具。仅在一次性隔离环境使用；不自动修改共享入口、网络、DNS 或 GitHub 设置。GHCR 发布、版本清单和维护切换留给后续切片；独立迁移与内部就绪检查见[已有实例迁移与内部检查](#已有实例迁移与内部检查)，不能拿此配置直接升级需要保留的旧实例。
+本节交付 Spec 004 的生产基础，不是正式部署、发布或更新工具。仅在一次性隔离环境使用；不自动修改共享入口、网络、DNS 或 GitHub 设置。GHCR 发布和手动更新工具见[发布与手动更新](production.md)；独立迁移与内部就绪检查见[已有实例迁移与内部检查](#已有实例迁移与内部检查)，不能拿此配置直接升级需要保留的旧实例。
 
 ### 构建及一次性验证
 
@@ -142,7 +142,7 @@ FILEHOP_PROD_WEB_IMAGE=filehop-isolated-static bash tests/production_smoke.sh
 
 ### 显式配置与操作约定
 
-`deploy/production.env.example` 是占位变量说明，实际配置保存在仓库外。项目名、镜像、精确 HTTPS Origin、代理 IP、专用网络名及两个**绝对**挂载路径均须显式填写，不能指向开发目录或共享开发网络。Compose 的路径插值不代替操作者核对绝对路径；当前还没有部署脚本替你校验全部配置。镜像须为此次审阅构建产物，未来正式发布按 digest 使用。
+`deploy/production.env.example` 是占位变量说明，实际配置保存在仓库外。项目名、镜像、精确 HTTPS Origin、代理 IP、专用网络名及两个**绝对**挂载路径均须显式填写，不能指向开发目录或共享开发网络。Compose 的路径插值不代替操作者核对绝对路径；手动使用 Compose 时须自行校验；更新工具接受独立 JSON 配置并核对绝对路径与真实挂载，见[运行指南](production.md)。正式产物按 digest 使用。
 
 `deploy/compose.production.yml` 仅运行后端，保持 `backend:8080`、`/data/database/transfer.db`、`/data/files`；入口使用唯一 `filehop-prod-backend:8080` 别名，开发使用 `filehop-dev-backend`。宿主入口须改用各专用网络的内部地址，不能依赖 Docker DNS；同步设置精确受信代理地址。生产不继承开发外层凭证。`deploy/caddy-production.routes` 使用 `FILEHOP_PROD_BACKEND_UPSTREAM` 与 `FILEHOP_PROD_WEB_ROOT`，后者只指向完整提取的静态版本目录，并由入口只读使用；容器入口只挂该目录，不挂数据库或上传目录。全局 443-only、TLS-ALPN-01 和共享入口操作边界仍见 [宿主入口指南](host-ingress.md)；本任务未应用这些设置。
 
@@ -224,7 +224,7 @@ bash scripts/dev.sh /srv/filehop-dev host stop
 
 普通业务变化也可能产生容器特有问题；默认延迟到发布 PR 检查。有相关风险时，在 Actions 的 Application checks 中选择对应分支手动运行完整检查（手动入口需先存在于默认分支），不要把基础检查成功当作容器路径已验证。并发组按 workflow、事件类型和 ref 隔离，手动完整检查不会被其他事件取消；同一事件类型与 ref 的新运行仍会取消旧运行。
 
-当前镜像仅加载到 runner 用于测试，不推送 GHCR、不部署；开发 Web 镜像运行 Vite，独立的 `web-production.Dockerfile` 交付可提取静态制品。容器检查还运行生产形态 HTTPS 冒烟，因此选中容器检查时也准备 Caddy 并执行既有入口检查。正式版本 tag 的 ARM64 构建与发布遵循 Spec 004，尚未实现。PR 来源策略仍由独立的 `.github/workflows/pr-policy.yml` 检查。
+当前镜像仅加载到 runner 用于测试，不推送 GHCR、不部署；开发 Web 镜像运行 Vite，独立的 `web-production.Dockerfile` 交付可提取静态制品。容器检查还运行生产形态 HTTPS 冒烟，因此选中容器检查时也准备 Caddy 并执行既有入口检查。正式版本 tag 的 ARM64 构建与发布由独立 `release.yml` 实现，前置授权、公开检查及实际发布限制见[运行指南](production.md)。PR 来源策略仍由独立的 `.github/workflows/pr-policy.yml` 检查。
 
 ## GitHub Actions 缓存
 
@@ -268,7 +268,7 @@ dev/main 的 push 不再触发 Application checks，因此不会刷新对应分�
 
 ### 已有实例迁移与内部检查
 
-先核对目标版本、两个绝对挂载目录、UID/GID 和存储身份；生产须在已授权的维护窗口结束传输并停止旧后端，确认没有其他进程写同一实例；允许入口暂不可用，不要求独立维护状态机。以下是目标镜像的独立调用契约，不表示生产部署脚本、发布清单或维护开关已经实现。不要从开发工作区编译的程序迁移生产：
+先核对目标版本、两个绝对挂载目录、UID/GID 和存储身份；生产须在已授权的维护窗口结束传输并停止旧后端，确认没有其他进程写同一实例；允许入口暂不可用，不要求独立维护状态机。以下是目标镜像的独立调用契约；手动更新脚本及发布记录见[运行指南](production.md)，不建设持久维护开关。不要从开发工作区编译的程序迁移生产：
 
 ```bash
 # 变量由操作者从受信发布信息和本地配置明确提供；目录必须已经存在。

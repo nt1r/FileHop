@@ -76,12 +76,30 @@ try {
   await stop()
   // 保留两个数据挂载以及入口证书/静态目录，重建应用后重新解析内部地址。
   const compose = JSON.parse(process.env.FILEHOP_TEST_PROD_COMPOSE)
-  assert.equal(spawnSync('docker', [...compose, 'up', '-d', '--no-build', '--force-recreate'], { stdio: 'inherit' }).status, 0)
+  // 最近实际发布镜像负责种数据；首次发布时与目标相同，不伪造跨结构升级证据。
+  const targetEnv = { ...process.env, FILEHOP_PROD_BACKEND_IMAGE: process.env.FILEHOP_BACKEND_IMAGE || 'filehop-issue6-backend' }
+  // 目标镜像必须拒绝与旧写入者并发迁移；停旧后迁移再启动，验证原消息/文件保留。
+  assert.notEqual(spawnSync('docker', [...compose, 'run', '--rm', '-T', '--no-deps', 'backend', 'migrate'], { stdio: 'inherit', env: targetEnv }).status, 0)
+  assert.equal(spawnSync('docker', [...compose, 'stop', 'backend'], { stdio: 'inherit' }).status, 0)
+  assert.equal(spawnSync('docker', [...compose, 'run', '--rm', '-T', '--no-deps', 'backend', 'migrate'], { stdio: 'inherit', env: targetEnv }).status, 0)
+  assert.equal(spawnSync('docker', [...compose, 'up', '-d', '--no-build', '--force-recreate'], { stdio: 'inherit', env: targetEnv }).status, 0)
   const id = spawnSync('docker', [...compose, 'ps', '-q', 'backend'], { encoding: 'utf8' })
   assert.equal(id.status, 0)
   const ip = spawnSync('docker', ['inspect', '-f', '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}', id.stdout.trim()], { encoding: 'utf8' })
   assert.equal(ip.status, 0)
   env.FILEHOP_PROD_BACKEND_UPSTREAM = `${ip.stdout.trim()}:8080`
+  const deadline = Date.now() + 15000
+  while (true) {
+    try {
+      const response = await fetch(`http://${env.FILEHOP_PROD_BACKEND_UPSTREAM}/internal/ready`, { signal: AbortSignal.timeout(1000) })
+      if (response.ok) {
+        assert.deepEqual(await response.json(), { database_available: true, uploads_ready: true })
+        break
+      }
+    } catch { /* 启动时只读就绪探测允许限时重试。 */ }
+    assert.ok(Date.now() < deadline, 'Target image must become ready after migration')
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
   await start()
   await browser('verify')
 } finally {
