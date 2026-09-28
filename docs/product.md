@@ -1,6 +1,6 @@
 # FileHop 第一版产品需求基线
 
-状态：已确认。本文记录长期产品规则；单轮上传、串行队列、手动删除刷新及登录恢复收缩待 [Spec 007](specs/007-implemented-flow-simplification.md) 实施，不代表现有版本已采用。
+状态：已确认。本文记录长期产品规则；单轮上传与串行队列已随 [Spec 007](specs/007-implemented-flow-simplification.md) B 实现，手动删除刷新及登录恢复的其余收缩仍待 A/C，不代表现有版本已采用全部目标。
 
 相关文档：[领域术语](../CONTEXT.md) · [交付路线图](roadmap.md)
 

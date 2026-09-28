@@ -1,6 +1,6 @@
 # Spec 007：已实现流程精简计划
 
-状态：用户已确认，待实施。本次只改变目标契约，不代表现有代码已精简或重新验收。[实施主 Issue #89](https://github.com/nt1r/FileHop/issues/89) 跟踪 A/B/C 及验证进度，不复制或替代本文件。
+状态：用户已确认；B 单轮发送及串行队列已实现，A/C 仍待实施。B 的 API 与浏览器自动化已更新，实际检查结果见对应提交说明；不代表人工 Chrome、生产部署或全部精简目标已验收。[实施主 Issue #89](https://github.com/nt1r/FileHop/issues/89) 跟踪 A/B/C 及验证进度，不复制或替代本文件。
 
 本文件维护改造顺序、删除目标及交付检查；长期行为以修订后的 [Spec 002](002-desktop-file-transfer.md)、[Spec 003](003-server-file-management.md) 为准，文本仍以 [Spec 001](001-desktop-text-loop.md) 为准。关联：[产品基线](../product.md) · [测试原则](../testing.md) · [路线图](../roadmap.md)。不建立第二份完整行为清单。
 

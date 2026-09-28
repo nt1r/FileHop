@@ -109,19 +109,15 @@ export default function Messages({ exchange, files, deletion }: { exchange: Retu
       <Text variant="secondary" size="sm">{typeof files.limits === 'number' ? `单文件上限 ${files.limits.toLocaleString('zh-CN')} 字节；服务器最终确认准入。` :
         files.limits === 'loading' ? '正在读取服务器文件限制…' : '限制未知或离线，暂不可选择文件。'} 刷新后不会恢复上传；重新选择前请先检查消息历史。</Text>
       {files.limits === 'unavailable' && <Button variant="ghost" onClick={() => void files.refresh()}>重查文件限制</Button>}
-      {files.paused && <Text role="status" variant="secondary" size="sm">暂停新上传：网络不可用或仍有结果未确认，恢复后先协调已开始的任务。</Text>}
-      {files.waiting > 0 && <Text role="status" variant="secondary" size="sm">仍有 {files.waiting} 项结果待确认：这些任务仍占活动名额；状态无法确认时暂停新上传，本页将继续查询，不会自动重发。</Text>}
+      {files.paused && <Text role="status" variant="secondary" size="sm">暂停新上传：网络不可用或仍有结果未确认。未确认项须手动查询或结束本轮，不会自动查询或重传。</Text>}
+      {files.tasks.length > 0 && <Button variant="ghost" onClick={files.endBatch}>结束本轮</Button>}
       {files.tasks.map(task => <div className="upload-task" key={task.sendId}>
         <Text>{task.name} · {task.size.toLocaleString('zh-CN')} 字节</Text>
         <progress max={100} value={task.progress} aria-label={`${task.name} 上传进度`} />
         <Text role="status" variant={task.status === '上传成功' ? 'success' : task.pending ? 'secondary' : 'error'} size="sm">{task.status}</Text>
         {task.queued && <Button variant="ghost" onClick={() => files.remove(task.sendId)}>移除等待项</Button>}
-        {!task.queued && task.status !== '上传成功' && !task.status.startsWith('已停止') && <div className="recovery">
-          {!task.stopping && !task.abandoned && <Button variant="secondary" onClick={() => void files.stop(task.sendId)}>停止上传</Button>}
-          {!task.pending && <Button variant="secondary" onClick={() => void files.query(task.sendId)}>查询文件结果</Button>}
-          {!task.pending && !task.abandoned && <Button variant="secondary" onClick={() => void files.retry(task.sendId)}>同次重试文件</Button>}
-          {!task.pending && task.status.startsWith('结果未确认：') && !task.abandoned && <Button variant="ghost" onClick={() => files.abandon(task.sendId)}>放弃确认</Button>}
-        </div>}
+        {task.pending && !task.unresolved && <Button variant="secondary" onClick={() => files.interrupt(task.sendId)}>中断传输</Button>}
+        {task.unresolved && !task.pending && <Button variant="secondary" onClick={() => void files.query(task.sendId)}>查询文件结果</Button>}
       </div>)}
     </LayerCard>
 

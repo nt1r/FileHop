@@ -16,18 +16,19 @@ export async function verifyServerFiles(page: Page) {
   await page.getByLabel('正文', { exact: true }).fill('navigation draft')
   await expect(page.getByRole('button', { name: '选择文件', exact: true })).toBeEnabled()
   await page.locator('input[type="file"]').setInputFiles(names.map(name => ({ name, mimeType: 'text/plain', buffer: Buffer.from(name) })))
-  await expect.poll(() => releases.size).toBe(3)
+  await expect.poll(() => releases.size).toBe(1)
   await page.getByRole('button', { name: '服务器文件', exact: true }).click()
   const listing = page.getByRole('region', { name: '服务器文件' })
   await expect(listing).toBeVisible()
   const usage = listing.getByRole('region', { name: '应用文件额度', exact: true })
   await expect(usage).toContainText('总额度：1,073,741,824 字节')
-  await expect(usage).toContainText('上传预留：48 字节')
+  await expect(usage).toContainText('上传预留：16 字节')
   await expect(listing.getByText(names[0], { exact: false })).toHaveCount(0)
-  releases.get(names[0])!()
-  // 切页不能停止等待项接续；第四个请求在文件页仍会开始。
-  await expect.poll(() => releases.size).toBe(4)
-  for (const name of names.slice(1)) releases.get(name)!()
+  // 切页不能停止串行队列，后续项在文件页仍按选择顺序接续。
+  for (const [index, name] of names.entries()) {
+    await expect.poll(() => releases.size).toBe(index + 1)
+    releases.get(name)!()
+  }
   await expect.poll(() => completed).toBe(4)
   await page.unrouteAll({ behavior: 'wait' })
   await listing.getByRole('button', { name: '刷新文件列表' }).click()
