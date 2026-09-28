@@ -4,7 +4,7 @@
 
 关联：[产品基线](../product.md) · [路线图](../roadmap.md) · [Spec 001](001-desktop-text-loop.md) · [Spec 002](002-desktop-file-transfer.md) · [Spec 003](003-server-file-management.md)
 
-本文件为本切片唯一 Spec，尚未创建远程 Issue。
+本文件为本切片唯一权威 Spec；[实施主 Issue #74](https://github.com/nt1r/FileHop/issues/74) 跟踪实施、依赖与验收证据，不复制或替代本文件。
 
 ## 1. 目标与范围
 
