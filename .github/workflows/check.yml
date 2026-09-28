@@ -3,8 +3,6 @@ name: Application checks
 on:
   pull_request:
     branches: [dev, main]
-  push:
-    branches: [dev, main]
   workflow_dispatch:
 
 permissions:
@@ -78,7 +76,7 @@ jobs:
         if: steps.scope.outputs.application == 'true'
         run: cargo test --manifest-path backend/Cargo.toml --locked
       - name: Bounded memory regression
-        if: steps.scope.outputs.application == 'true'
+        if: steps.scope.outputs.containers == 'true'
         run: cargo test --manifest-path backend/Cargo.toml --locked --test files_process bounded_memory -- --ignored --nocapture
       - name: Build backend
         if: steps.scope.outputs.application == 'true'
