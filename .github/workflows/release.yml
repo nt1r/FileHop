@@ -1,0 +1,137 @@
+name: Release ARM64
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.repository == 'nt1r/FileHop'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      packages: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify trusted source and publication prerequisites
+        shell: bash
+        env:
+          PUBLICATION_APPROVED_SHA: ${{ vars.FILEHOP_PUBLICATION_APPROVED_SHA }}
+        run: |
+          set -euo pipefail
+          # 先用 workflow 内联规则验证来源，再执行目标提交中的脚本；不消费 PR 制品或缓存。
+          [[ "$VERSION" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          git fetch origin main
+          sha=$(git rev-parse "refs/tags/$VERSION^{commit}")
+          git merge-base --is-ancestor "$sha" refs/remotes/origin/main
+          [[ "$sha" == "$(git rev-parse HEAD)" ]]
+          [[ $(gh api repos/nt1r/FileHop/branches/main --jq .protected) == true ]]
+          # 未配置 tag 防改写保护时失败关闭；设置变更由操作者单独授权完成。
+          gh api --paginate repos/nt1r/FileHop/rulesets --jq '.[] | select(.target == "tag" and .enforcement == "active") | .id' > /tmp/tag-rules
+          protected=false
+          while read -r id; do
+            gh api "repos/nt1r/FileHop/rulesets/$id" > /tmp/tag-rule.json
+            if jq -e '(.conditions.ref_name.exclude | length == 0) and
+              (.conditions.ref_name.include | any(. == "refs/tags/v*" or . == "~ALL")) and
+              ([.rules[].type] | index("creation") != null and index("update") != null and index("deletion") != null)' /tmp/tag-rule.json >/dev/null; then protected=true; fi
+          done < /tmp/tag-rules
+          [[ "$protected" == true ]]
+          # 人工公开检查绑定源码 SHA，不把一次批准永久套用到未来版本。
+          [[ "$PUBLICATION_APPROVED_SHA" == "$sha" ]]
+          gh api --paginate repos/nt1r/FileHop/releases --jq '.[].tag_name' > /tmp/released-tags
+          ! grep -Fx "$VERSION" /tmp/released-tags
+          echo "RELEASE_SHA=$sha" >> "$GITHUB_ENV"
+          git checkout --detach "$sha"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+      - name: Prepare verification tools
+        run: |
+          corepack enable pnpm
+          pnpm -C web install --frozen-lockfile
+          pnpm -C web exec playwright install --with-deps --only-shell chromium
+          curl --fail --location --max-time 60 --output /tmp/caddy.tar.gz https://github.com/caddyserver/caddy/releases/download/v2.11.4/caddy_2.11.4_linux_arm64.tar.gz
+          echo 'd5a7c423853c24a799765e0e8210d5c7c22a8f56ed37a3cae2fb9f58be138853c02b4efd6b59d576e6d8c7c0d30b9c1592deeaa6a536ff69bcca23b8c1ea709c  /tmp/caddy.tar.gz' | sha512sum --check
+          tar -xzf /tmp/caddy.tar.gz -C "$RUNNER_TEMP" caddy
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+          rustup show
+      - name: Build same-commit artifacts without PR caches
+        run: |
+          docker build --platform linux/arm64 -f deploy/backend.Dockerfile -t filehop-release-backend \
+            --label "org.opencontainers.image.revision=$RELEASE_SHA" --label "org.opencontainers.image.version=$VERSION" \
+            --label org.opencontainers.image.source=https://github.com/nt1r/FileHop --label org.opencontainers.image.licenses=Apache-2.0 .
+          docker build --platform linux/arm64 -f deploy/web-production.Dockerfile -t filehop-release-web \
+            --label "org.opencontainers.image.revision=$RELEASE_SHA" --label "org.opencontainers.image.version=$VERSION" \
+            --label org.opencontainers.image.source=https://github.com/nt1r/FileHop --label org.opencontainers.image.licenses=Apache-2.0 .
+      - name: Check target artifacts and migration combination
+        env:
+          FILEHOP_BACKEND_IMAGE: filehop-release-backend
+          FILEHOP_PROD_WEB_IMAGE: filehop-release-web
+        run: |
+          node tests/release_cli.mjs
+          node tests/update_cli.mjs
+          # 没有正式旧版本时验证初始化；以后自动选择最近实际发布的镜像，不造全历史矩阵。
+          gh api --paginate --slurp repos/nt1r/FileHop/releases > /tmp/releases.json
+          previous=$(jq -r '[.[][] | select(.draft == false and .prerelease == false)] | sort_by(.published_at) | last | .tag_name // empty' /tmp/releases.json)
+          if [[ -n "$previous" ]]; then
+            mkdir -p "$RUNNER_TEMP/previous"
+            gh release download "$previous" --repo nt1r/FileHop --pattern release.json --dir "$RUNNER_TEMP/previous"
+            node scripts/release.mjs manifest "$previous" "$RUNNER_TEMP/previous/release.json"
+            export FILEHOP_PREVIOUS_BACKEND_IMAGE=$(jq -r .backend "$RUNNER_TEMP/previous/release.json")
+            docker pull --platform linux/arm64 "$FILEHOP_PREVIOUS_BACKEND_IMAGE"
+          fi
+          bash tests/production_smoke.sh
+      - name: Reserve version and publish artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          # draft 也是已占用版本。中断后人工调查，不覆盖旧 Release 或自动重跑发布。
+          gh release create "$VERSION" --repo nt1r/FileHop --verify-tag --draft --title "$VERSION" \
+            --notes "Source: $RELEASE_SHA. ARM64 backend and static Web share this commit. See release.json for immutable digests."
+          echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          mkdir -p release-assets
+          for component in backend web; do
+            image="ghcr.io/nt1r/filehop-$component:build-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+            docker tag "filehop-release-$component" "$image"
+            docker push "$image"
+            docker inspect --format '{{index .RepoDigests 0}}' "$image" > "release-assets/$component.digest"
+          done
+          jq -n --arg version "$VERSION" --arg sha "$RELEASE_SHA" \
+            --arg backend "$(< release-assets/backend.digest)" --arg web "$(< release-assets/web.digest)" \
+            '{version:$version,sha:$sha,backend:$backend,web:$web}' > release-assets/release.json
+          node scripts/release.mjs manifest "$VERSION" release-assets/release.json
+          docker logout ghcr.io
+          # 使用空凭证目录验证匿名读取；首次包为私有时保留 draft，先另行授权公开包。
+          mkdir /tmp/filehop-anonymous-docker
+          for component in backend web; do
+            DOCKER_CONFIG=/tmp/filehop-anonymous-docker docker pull "$(< "release-assets/$component.digest")"
+          done
+          artifact=$(docker create filehop-release-web /unused)
+          docker cp "$artifact:/web" release-assets/web
+          docker cp "$artifact:/licenses" release-assets/web-licenses
+          docker rm "$artifact"
+          artifact=$(docker create filehop-release-backend)
+          docker cp "$artifact:/licenses" release-assets/backend-licenses
+          docker cp "$artifact:/usr/share/doc" release-assets/system-licenses
+          docker rm "$artifact"
+          tar -czf release-assets/web.tar.gz -C release-assets/web .
+          tar -czf release-assets/licenses.tar.gz -C release-assets web-licenses backend-licenses system-licenses
+          cp LICENSE release-assets/LICENSE
+          (cd release-assets && sha256sum release.json web.tar.gz licenses.tar.gz LICENSE > SHA256SUMS)
+          gh release upload "$VERSION" --repo nt1r/FileHop release-assets/release.json release-assets/web.tar.gz \
+            release-assets/licenses.tar.gz release-assets/LICENSE release-assets/SHA256SUMS
+          gh release edit "$VERSION" --repo nt1r/FileHop --draft=false --latest

@@ -1,0 +1,10 @@
+{
+  "project": "filehop-production",
+  "databaseDir": "/srv/filehop-production/data/database",
+  "filesDir": "/srv/filehop-production/data/files",
+  "webRoot": "/srv/filehop-production/web",
+  "network": "filehop-production-ingress",
+  "backendIp": "192.0.2.11",
+  "trustedProxy": "192.0.2.10",
+  "origin": "https://filehop.example.invalid"
+}

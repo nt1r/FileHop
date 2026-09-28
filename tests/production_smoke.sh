@@ -49,7 +49,7 @@ dev_proxy=$(docker network inspect -f '{{(index .IPAM.Config 0).Gateway}}' "$net
 port=$(node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})')
 cat >"$root/production.env" <<EOF
 FILEHOP_PROD_PROJECT=$project
-FILEHOP_PROD_BACKEND_IMAGE=${FILEHOP_BACKEND_IMAGE:-filehop-issue6-backend}
+FILEHOP_PROD_BACKEND_IMAGE=${FILEHOP_PREVIOUS_BACKEND_IMAGE:-${FILEHOP_BACKEND_IMAGE:-filehop-issue6-backend}}
 FILEHOP_PROD_ORIGIN=https://localhost:$port
 FILEHOP_PROD_TRUSTED_PROXY=$proxy
 FILEHOP_PROD_DATABASE_DIR=$root/database
