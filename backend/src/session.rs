@@ -141,6 +141,7 @@ fn router_inner(database: PathBuf, files: PathBuf, config: Config, recovered: bo
         }
     });
     Router::new()
+        .route("/internal/ready", get(readiness))
         .route("/api/session", get(current).post(login).delete(logout))
         .route("/api/sends/{send_id}", get(crate::messages::result))
         .route("/api/transfer-limits", get(crate::files::limits))
@@ -177,6 +178,26 @@ fn router_inner(database: PathBuf, files: PathBuf, config: Config, recovered: bo
             get(crate::messages::recent).post(crate::messages::send),
         )
         .with_state(service)
+}
+
+async fn readiness(State(service): State<Arc<Service>>) -> Response {
+    // 存活不等于就绪：分别检查数据库可读和受管文件身份／恢复状态。
+    // 不探测单个文件、不把额度已满或待删除文件误报为全实例未就绪。
+    let database_available = crate::storage::database_available(&service.database).await;
+    let uploads_ready = database_available
+        && service
+            .transfers
+            .ready
+            .load(std::sync::atomic::Ordering::Acquire)
+        && matches!(
+            crate::storage::inspect(&service.database, &service.files).await,
+            crate::storage::Status::Initialized
+        );
+    (
+        if uploads_ready { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE },
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(serde_json::json!({"database_available": database_available, "uploads_ready": uploads_ready})),
+    ).into_response()
 }
 
 pub(crate) fn error(status: StatusCode, code: &str, message: &str) -> Response {
