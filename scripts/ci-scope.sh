@@ -26,6 +26,7 @@ case "${1:?event required}" in
           case "$path" in
             # These fixtures are independent of container and ingress smoke tests.
             tests/browser.sh|tests/browser.mjs|tests/text-cases.json|tests/dev_script.sh|.github/workflows/pr-policy.yml) ;;
+            deploy/caddy-production.routes|web/tests/production.test.ts|web/playwright.config.ts) containers=true; ingress=true ;;
             tests/caddy_ingress.sh|tests/caddy_ingress.mjs|deploy/caddy*|deploy/Caddyfile*|deploy/filehop-caddy.service) ingress=true ;;
             # Shared/unknown orchestration is deliberately conservative.
             scripts/*|.github/*|tests/*|.nvmrc|.env.example) containers=true; ingress=true ;;

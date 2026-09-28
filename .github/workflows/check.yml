@@ -100,7 +100,7 @@ jobs:
         if: steps.scope.outputs.application == 'true'
         run: pnpm -C web exec playwright install --with-deps --only-shell chromium
       - name: Isolated HTTPS ingress
-        if: steps.scope.outputs.ingress == 'true'
+        if: steps.scope.outputs.ingress == 'true' || steps.scope.outputs.containers == 'true'
         run: |
           root=$(mktemp -d -t filehop-caddy-ci-XXXXXXXX)
           trap '[[ "$root" == /tmp/filehop-caddy-ci-* && -d "$root" && ! -L "$root" ]] && rm -rf -- "$root"' EXIT
@@ -108,12 +108,17 @@ jobs:
           echo "8220d1f013b6f27510247b2360c9e0ca9f018feebd82515f07635318b34ff9777ccc8fd0b6e6f2486ce3a33fe389fbb7db12d05baa474f4587509fb4f5ebf1c9  $root/caddy.tar.gz" | sha512sum --check
           tar -xzf "$root/caddy.tar.gz" -C "$root" caddy
           PATH="$root:$PATH" bash tests/caddy_ingress.sh
+          # 生产镜像闭环稍后也使用同一已校验 Caddy；只安装到 runner 的临时目录。
+          install -m 755 "$root/caddy" "$RUNNER_TEMP/caddy"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
       - name: Browser application regression
         if: steps.scope.outputs.application == 'true'
         run: bash tests/browser.sh
       - name: Compose configuration
         if: steps.scope.outputs.application == 'true'
-        run: docker compose --env-file .env.example -f deploy/compose.dev.yml config --quiet
+        run: |
+          docker compose --env-file .env.example -f deploy/compose.dev.yml config --quiet
+          docker compose --env-file deploy/production.env.example -f deploy/compose.production.yml config --quiet
       - name: Set up Docker Buildx
         if: steps.scope.outputs.containers == 'true'
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
@@ -139,8 +144,20 @@ jobs:
           push: false
           cache-from: type=gha,version=2,scope=checks-web-${{ runner.os }}-${{ runner.arch }}
           cache-to: type=gha,version=2,scope=checks-web-${{ runner.os }}-${{ runner.arch }},mode=max
+      - name: Build production static artifact
+        if: steps.scope.outputs.containers == 'true'
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: deploy/web-production.Dockerfile
+          tags: filehop-production-web
+          load: true
+          push: false
+          cache-from: type=gha,version=2,scope=checks-static-${{ runner.os }}-${{ runner.arch }}
+          cache-to: type=gha,version=2,scope=checks-static-${{ runner.os }}-${{ runner.arch }},mode=max
       - name: Container smoke tests
         if: steps.scope.outputs.containers == 'true'
         run: |
           bash tests/compose_smoke.sh
           bash tests/web_container_smoke.sh
+          bash tests/production_smoke.sh

@@ -45,7 +45,7 @@ done
 for path in backend/Cargo.lock backend/tests/initialization.rs backend/tests/support/mod.rs web/package.json web/vite.config.ts .dockerignore; do
   check_path "$path" true true false
 done
-for path in deploy/compose.host.yml scripts/ci-scope.sh .github/workflows/check.yml tests/persistence.mjs tests/compose_smoke.sh tests/new-fixture.mjs; do
+for path in deploy/compose.host.yml deploy/compose.production.yml deploy/caddy-production.routes deploy/web-production.Dockerfile web/tests/production.test.ts web/playwright.config.ts tests/production_smoke.sh tests/production_ingress.mjs scripts/ci-scope.sh .github/workflows/check.yml tests/persistence.mjs tests/compose_smoke.sh tests/new-fixture.mjs; do
   check_path "$path" true true true
 done
 # Multiple commits: a later docs change must not hide an earlier risky change.
