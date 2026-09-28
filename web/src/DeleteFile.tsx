@@ -8,7 +8,7 @@ export default function DeleteFile({ file, deletion }: { file: Extract<Message, 
   return <>
     {operation?.notice && <Text role="status">{operation.notice}</Text>}
     {(file.file_state === 'available' || file.file_state === 'storage_error') && <Button variant="ghost" size="sm"
-      disabled={operation?.busy || operation?.phase === 'accepted'}
+      disabled={operation?.phase === 'requesting' || operation?.phase === 'accepted'}
       onClick={() => deletion.remove(file)}>{operation?.phase === 'unknown' ? '再次确认删除' : '删除服务器文件'}</Button>}
   </>
 }
