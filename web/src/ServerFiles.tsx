@@ -5,12 +5,13 @@ import { Text } from '@cloudflare/kumo/components/text'
 import { fileStateLabels, isMessage, type Message, type useMessages } from './messages'
 import type { useFiles } from './files'
 import StorageUsage from './StorageUsage'
-import type { useDeletion } from './deletion'
+import { useDeletion } from './deletion'
 import DeleteFile from './DeleteFile'
 
 type FileMessage = Extract<Message, { kind: 'FILE' }>
 
-export default function ServerFiles({ files, exchange, deletion, onExpired }: { files: ReturnType<typeof useFiles>; exchange: ReturnType<typeof useMessages>; deletion: ReturnType<typeof useDeletion>; onExpired: () => void }) {
+export default function ServerFiles({ files, exchange, onExpired }: { files: ReturnType<typeof useFiles>; exchange: ReturnType<typeof useMessages>; onExpired: () => void }) {
+  const deletion = useDeletion(onExpired)
   const [usageRefresh, setUsageRefresh] = useState(0)
   const [items, setItems] = useState<FileMessage[]>([])
   const [before, setBefore] = useState<string | null>(null)
@@ -78,7 +79,7 @@ export default function ServerFiles({ files, exchange, deletion, onExpired }: { 
         <div><Text variant="heading3" as="h2">服务器文件</Text><Text variant="secondary" size="sm">按成功上传顺序展示；仅管理经 FileHop 提交的文件。</Text></div>
         <Button variant="secondary" disabled={busy} onClick={() => { void load(); setUsageRefresh(value => value + 1) }}>刷新文件列表</Button>
       </div>
-      <StorageUsage refresh={usageRefresh + deletion.usageRevision} onExpired={onExpired} />
+      <StorageUsage refresh={usageRefresh} onExpired={onExpired} />
       {notice && <Text role="status" variant="error">{notice}</Text>}
       {exchange.fileStatusNotice && <Text role="status" variant="error">{exchange.fileStatusNotice}</Text>}
       {busy && <Text role="status">正在读取文件列表…</Text>}
