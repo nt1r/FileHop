@@ -103,8 +103,39 @@ async fn committed_file_survives_forced_process_exit_and_remains_downloadable() 
     let message: serde_json::Value =
         serde_json::from_str(response.split("\r\n\r\n").nth(1).unwrap()).unwrap();
     let file_id = message["file_id"].as_str().unwrap();
+    let text_send = uuid::Uuid::new_v4();
+    let text_input = serde_json::json!({"send_id":text_send.to_string(), "text":"synthetic migration history", "source_label":"Desktop"}).to_string();
+    assert_eq!(
+        http(address, "POST", "/api/messages", &cookie, &text_input).0,
+        201
+    );
     drop(server); // SIGKILL，而非正常关闭，重启前没有机会执行清理。
+    // 使用真实管理命令验证现有迁移集合不破坏历史；并非已发布旧版本升级证明。
+    let migrated = Command::new(env!("CARGO_BIN_EXE_backend"))
+        .arg("--database-dir")
+        .arg(&database)
+        .arg("--files-dir")
+        .arg(&files)
+        .arg("migrate")
+        .output()
+        .unwrap();
+    assert!(migrated.status.success(), "{migrated:?}");
     let (_server, address) = start(&database, &files);
+    assert_eq!(
+        http(
+            address,
+            "POST",
+            "/api/session",
+            "",
+            r#"{"username":"Admin","password":" synthetic password "}"#
+        )
+        .0,
+        200
+    );
+    let (status, replay) = http(address, "POST", "/api/messages", &cookie, &text_input);
+    assert_eq!(status, 200);
+    assert!(replay.contains("synthetic migration history"));
+    assert!(replay.contains("Desktop"));
     assert_eq!(
         http(address, "GET", &format!("/api/sends/{send}"), &cookie, "").0,
         200
