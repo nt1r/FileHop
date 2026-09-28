@@ -86,6 +86,8 @@ jobs:
         run: |
           for script in scripts/*.sh tests/*.sh; do bash -n "$script"; done
           bash tests/dev_script.sh
+          node tests/release_cli.mjs
+          node tests/update_cli.mjs
       - name: Install web dependencies
         if: steps.scope.outputs.application == 'true'
         run: pnpm -C web install --frozen-lockfile

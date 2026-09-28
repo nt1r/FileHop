@@ -1,0 +1,75 @@
+import assert from 'node:assert/strict'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+import { spawnSync } from 'node:child_process'
+const root = mkdtempSync(join(tmpdir(), 'filehop-update-test-'))
+const cli = resolve('scripts/update.mjs')
+try {
+  for (const dir of ['database', 'files', 'web']) mkdirSync(join(root, dir))
+  const config = { project: 'filehop-production', databaseDir: join(root, 'database'), filesDir: join(root, 'files'),
+    webRoot: join(root, 'web'), network: 'filehop-production-ingress', backendIp: '192.0.2.11',
+    trustedProxy: '192.0.2.10', origin: 'https://filehop.example.invalid' }
+  const path = join(root, 'production.json')
+  const run = (value, version = 'v1.2.3') => {
+    writeFileSync(path, JSON.stringify(value))
+    return spawnSync(process.execPath, [cli, 'check', path, version], { encoding: 'utf8' })
+  }
+  assert.equal(run(config).status, 0)
+  for (const change of [{ databaseDir: '.' }, { filesDir: config.databaseDir },
+    { webRoot: config.databaseDir }, { project: 'filehop-dev' }, { origin: 'http://localhost' },
+    { backendIp: '0.0.0.0' }, { filesDir: join(root, 'missing') }, { databaseDir: '$HOME/data' }]) {
+    assert.notEqual(run({ ...config, ...change }).status, 0, JSON.stringify(change))
+  }
+  assert.notEqual(run(config, '../latest').status, 0)
+  console.log('Update CLI rejects unsafe configuration before Docker or download.')
+  const bin = join(root, 'bin'); mkdirSync(bin)
+  const manifest = { version: 'v1.2.3', sha: 'a'.repeat(40), backend: `ghcr.io/nt1r/filehop-backend@sha256:${'b'.repeat(64)}`, web: `ghcr.io/nt1r/filehop-web@sha256:${'c'.repeat(64)}` }
+  const log = join(root, 'calls')
+  const fake = `#!/usr/bin/env node
+const fs = require('fs'); const path = require('path');
+const tool = path.basename(process.argv[1]); const args = process.argv.slice(2);
+const c = JSON.parse(fs.readFileSync(process.env.CONFIG));
+const m = JSON.parse(process.env.MANIFEST);
+fs.appendFileSync(process.env.CALLS, JSON.stringify([tool,...args])+'\\n');
+if (tool === 'gh') {
+ if (args[1] === 'view') console.log(JSON.stringify({tagName:m.version,isDraft:false,isPrerelease:false}));
+ else fs.writeFileSync(path.join(args[args.indexOf('--dir')+1],'release.json'),JSON.stringify(m));
+} else if (tool === 'curl') {
+ const url=args.at(-1);
+ console.log(url.endsWith('/internal/ready') ? JSON.stringify({database_available:true,uploads_ready:true}) : url.endsWith('/api/status') ? JSON.stringify({state:'initialized'}) : '<html>synthetic</html>');
+} else if (args[0] === 'image') console.log(JSON.stringify([{Os:'linux',Architecture:process.env.BAD_ARCH ? 'amd64' : 'arm64',Config:{Labels:{'org.opencontainers.image.revision':m.sha,'org.opencontainers.image.version':m.version}}}]));
+else if (args[0] === 'create') console.log('extract-id');
+else if (args[0] === 'cp') fs.writeFileSync(path.join(args.at(-1),'index.html'),'<html>synthetic</html>');
+else if (args[0] === 'ps') console.log('existing-id');
+else if (args[0] === 'inspect') console.log(JSON.stringify([{Config:{Labels:{'com.docker.compose.service':'backend'}},Mounts:[{Type:'bind',Source:c.databaseDir,Destination:'/data/database'},{Type:'bind',Source:c.filesDir,Destination:'/data/files'}]}]));
+else if (args.includes('migrate') && process.env.FAIL_MIGRATE === 'yes') process.exit(9);
+`
+  for (const tool of ['docker', 'gh', 'curl']) writeFileSync(join(bin, tool), fake, { mode: 0o755 })
+  writeFileSync(path, JSON.stringify(config))
+  writeFileSync(join(config.databaseDir, 'sentinel'), 'preserve synthetic data')
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, CONFIG: path, CALLS: log, MANIFEST: JSON.stringify(manifest), FILEHOP_CONFIRM_STOP: 'yes' }
+  const update = extra => spawnSync(process.execPath, [cli, 'update', path, 'v1.2.3'], { encoding: 'utf8', env: { ...env, ...extra } })
+  const locked = spawnSync('flock', ['--nonblock', '/run/lock/filehop-update.lock', process.execPath, cli, 'update', path, 'v1.2.3'], { encoding: 'utf8', env })
+  assert.notEqual(locked.status, 0, 'A second updater must fail before downloads')
+  assert.ok(!existsSync(log))
+  assert.notEqual(update({ BAD_ARCH: 'yes' }).status, 0)
+  assert.ok(!readFileSync(log, 'utf8').includes('"stop"'), 'Invalid architecture must not stop the old backend')
+  config.webRoot = join(root, 'web-migration'); mkdirSync(config.webRoot)
+  writeFileSync(path, JSON.stringify(config))
+  assert.notEqual(update({ FAIL_MIGRATE: 'yes' }).status, 0)
+  const calls = readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse)
+  assert.ok(calls.some(args => args.includes('stop')))
+  assert.ok(calls.some(args => args.includes('migrate')))
+  assert.ok(!calls.some(args => args.includes('up')))
+  assert.equal(readFileSync(join(config.databaseDir, 'sentinel'), 'utf8'), 'preserve synthetic data')
+  assert.ok(!existsSync(join(root, 'current-release.json')))
+  assert.notEqual(update({}).status, 0, 'Must refuse blindly rerunning a failed target')
+  // 新的隔离静态目录代表操作者调查后明确开始的新一次更新，不由脚本自动清理失败现场。
+  config.webRoot = join(root, 'web-success'); mkdirSync(config.webRoot)
+  writeFileSync(path, JSON.stringify(config))
+  const success = update({})
+  assert.equal(success.status, 0, success.stderr)
+  assert.equal(JSON.parse(readFileSync(join(root, 'current-release.json'))).version, 'v1.2.3')
+  console.log('Update migration failure preserves data and blocks startup; successful smoke records version.')
+} finally { rmSync(root, { recursive: true }) }

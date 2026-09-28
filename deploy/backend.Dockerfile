@@ -13,10 +13,15 @@ RUN mkdir src \
 COPY backend/src ./src
 COPY backend/migrations ./migrations
 RUN cargo build --locked --release
+# 分发依赖自带的许可及声明；公开前仍需人工核对是否存在额外义务。
+COPY LICENSE /licenses/FileHop-LICENSE
+RUN find /usr/local/cargo/registry/src -type f \( -iname '*license*' -o -iname '*notice*' -o -iname '*copying*' \) \
+    -exec cp --parents '{}' /licenses/ \;
 
 FROM debian:bookworm-slim
 RUN groupadd --gid 10001 filehop && useradd --uid 10001 --gid filehop --no-create-home filehop
 COPY --from=build /app/target/release/backend /usr/local/bin/filehop
+COPY --from=build /licenses /licenses
 USER filehop
 EXPOSE 8080
 ENTRYPOINT ["filehop"]
