@@ -7,14 +7,14 @@
 | 切片 | 权威 Spec | 当前状态 |
 | --- | --- | --- |
 | 桌面文本 | [001](specs/001-desktop-text-loop.md) | 已实现；旧阶段仍有人工记录缺口，见 #4、PR #30/#32，不伪称已补验，也不再单开验收循环 |
-| 桌面文件传输 | [002](specs/002-desktop-file-transfer.md) | 原版验收通过，见 [#33](https://github.com/nt1r/FileHop/issues/33)；Spec 007 B 单轮/串行已实现，登录生命周期其余收缩待 C |
+| 桌面文件传输 | [002](specs/002-desktop-file-transfer.md) | 原版验收通过，见 [#33](https://github.com/nt1r/FileHop/issues/33)；Spec 007 B 单轮/串行及 C 登录失效后丢弃文件批次已实现 |
 | 服务器文件管理 | [003](specs/003-server-file-management.md) | 已实现；桌面验收由 [#60](https://github.com/nt1r/FileHop/issues/60)/PR #73 收口，主票 [#52](https://github.com/nt1r/FileHop/issues/52) 复用既有证据，不重做验收 |
 
 现有鉴权、准备幂等、额度、存储删除与恢复保护保留；上传强停止/后继重传及客户端自动协调按用户确认撤销，不借机重写存储。原生认证尚未实现，S002-F17、S003-M13 的原生部分留给 Android 切片。
 
 ## 当前改造：已实现流程精简
 
-[Spec 007](specs/007-implemented-flow-simplification.md)：A 单入口删除与手动刷新、B 单轮发送及串行队列已实现，稳定版桌面 Chrome 人工确认待完成；C 登录到期不恢复文件批次仍待实施。当前到期仍保留等待项和 File 引用，但不自动查询或重传未知发送。Spec 002/003 的旧验收不能证明新交互通过。
+[Spec 007](specs/007-implemented-flow-simplification.md)：A 单入口删除与手动刷新、B 单轮发送及串行队列、C 登录失效后丢弃文件批次均已实现，稳定版桌面 Chrome 人工确认待完成。到期清空等待项和全部 File 引用，仅保留草稿与未确认发送信息；重登可手动查询或结束本轮，不自动恢复批次。Spec 002/003 的旧验收不能证明新交互通过。
 
 按当前授权实施各切片，不自动推进部署或新建远期任务；不重新打开旧验收循环。
 

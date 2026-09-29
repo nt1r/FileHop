@@ -124,7 +124,7 @@ export default function SessionPage() {
     deadline.current = null
     clearTimeout(timer.current)
     setPhase('login')
-    setMessage('登录已到期，请在当前页面重新登录。')
+    setMessage('登录已失效，请在当前页面重新登录。已中断本地上传，等待文件需重新选择；服务器仍可能保存已接收的文件，重登后请手动查询结果或结束本轮。')
     setBusy(false)
   }
   function accept(value: Session, started: number) {
@@ -149,12 +149,8 @@ export default function SessionPage() {
     } catch (error) {
       if (version !== generation.current) return
       if (error instanceof ApplicationError && error.code === 'session_invalid') {
-        exchange.suspend(false)
-        files.suspend(false)
-        deadline.current = null
-        clearTimeout(timer.current)
-        setPhase('login')
-        setMessage(initial ? '已初始化，请登录。' : '请重新登录。')
+        expire()
+        if (initial) setMessage('已初始化，请登录。')
         // 新开页面也可能先确认 Cookie 已失效；只让正在退出的页面收敛，
         // 不把普通到期通知误当成主动丢弃草稿的指令。
         channel.current?.postMessage('session-invalid')

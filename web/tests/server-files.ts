@@ -103,7 +103,8 @@ export async function verifyServerFiles(page: Page) {
   await page.getByRole('button', { name: '消息工作区' }).click()
   await expect(page.getByRole('article').filter({ hasText: names[0] })).toContainText('存储异常')
   await expect(page.getByLabel('正文', { exact: true })).toHaveValue('navigation draft')
-  for (const name of names) await expect(page.locator('.upload-task').filter({ hasText: name })).toContainText('上传成功')
+  // 到期只保留未确认发送；已成功任务不跨登录保留，成功文件仍可从历史读取。
+  await expect(page.locator('.upload-task')).toHaveCount(0)
   await page.getByLabel('正文', { exact: true }).fill('navigation unknown send')
   // 断连后服务器结果未知；切页不能解锁正文或偷偷重发。
   await page.route('**/api/messages', async route => {

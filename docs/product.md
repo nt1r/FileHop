@@ -1,6 +1,6 @@
 # FileHop 第一版产品需求基线
 
-状态：已确认。本文记录长期产品规则；[Spec 007](specs/007-implemented-flow-simplification.md) A 手动删除刷新及 B 单轮上传与串行队列已实现；登录恢复的其余收缩仍待 C，不代表现有版本已采用全部目标。
+状态：已确认。本文记录长期产品规则；[Spec 007](specs/007-implemented-flow-simplification.md) A 手动删除刷新、B 单轮上传与串行队列及 C 登录失效后丢弃文件批次已实现；稳定版桌面 Chrome 人工确认仍待完成。
 
 相关文档：[领域术语](../CONTEXT.md) · [交付路线图](roadmap.md)
 

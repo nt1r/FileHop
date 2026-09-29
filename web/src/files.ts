@@ -2,13 +2,15 @@ import { useEffect, useRef, useState } from 'react'
 import { isMessage, normalizeLabel, validLabel, type Message } from './messages'
 
 // 一次选择固定发送身份且只传一轮。未知不是失败，必须由用户查询或结束整轮后才能解除暂停。
-type Task = { file: File; sendId: string; attemptId: string; source: string; name: string; size: number; progress: number; status: string; pending: boolean; queued: boolean; unresolved: boolean; interrupted: boolean }
+type Task = { mime: string; sendId: string; attemptId: string; source: string; name: string; size: number; progress: number; status: string; pending: boolean; queued: boolean; unresolved: boolean; interrupted: boolean }
 type Limits = 'loading' | 'unavailable' | number
 const unknown = '结果未确认：服务器可能已保存或仍在处理，请手动查询或结束本轮；重新选择前先检查历史，避免重复。'
 
 export function useFiles(active: boolean, onExpired: () => void, onMessage: (message: Message) => void, refreshFileStates: () => Promise<void>) {
   const [tasks, setTasks] = useState<Task[]>([])
   const [limits, setLimits] = useState<Limits>('loading')
+  // 文件实体集中持有，不放进任务快照或异步闭包；到期可立即释放，查询只需要元数据。
+  const selectedFiles = useRef(new Map<string, File>())
   const tasksRef = useRef(tasks)
   const limitsRef = useRef(limits)
   const uploadTimeout = useRef(0)
@@ -27,11 +29,13 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
     update(tasksRef.current.map(task => task.sendId === sendId ? { ...task, ...change } : task))
   }
   function result(sendId: string, status: string, unresolved = false) {
+    selectedFiles.current.delete(sendId)
     patch(sendId, { status, pending: false, unresolved })
   }
   function abortRequests() {
     // 先废弃回调，再 abort；同步触发的 onabort 也不能改写下一批任务。
     epoch.current++
+    selectedFiles.current.clear()
     for (const upload of xhr.current.values()) upload.abort()
     for (const controller of controls.current.values()) controller.abort()
     xhr.current.clear(); controls.current.clear()
@@ -45,9 +49,9 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
     live.current = false
     abortRequests()
     // 到期和退出都只中断本地请求，不向服务器承诺撤回或提前释放预留。
-    // 本切片保留到期后的等待项；生命周期切片再收缩 File 引用及队列保留范围。
-    update(clear ? [] : tasksRef.current.map(task => task.pending || task.unresolved
-      ? { ...task, status: unknown, pending: false, unresolved: true, interrupted: true } : task))
+    // 等待项尚未发送，必须重新选择；只留下可能已经保存的身份，供重登后手动查询。
+    update(clear ? [] : tasksRef.current.filter(task => task.pending || task.unresolved).map(task =>
+      ({ ...task, status: unknown, pending: false, queued: false, unresolved: true, interrupted: true })))
     setLimits('loading'); limitsRef.current = 'loading'
   }
   async function refresh() {
@@ -103,6 +107,7 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
     if (!task) return
     // 在发出准备前同步占用唯一页面名额；等待项不向服务器预留空间。
     patch(task.sendId, { queued: false, pending: true, status: '准备上传…' })
+    if (task.size > limitsRef.current) { result(task.sendId, '文件超过服务器单文件上限'); return }
     void prepare(task)
   }
   useEffect(() => { pump() }, [tasks, limits, active, online])
@@ -117,22 +122,28 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
       document.removeEventListener('visibilitychange', resume)
     }
   }, [])
-  async function choose(files: File[], label: string) {
+  function choose(files: File[], label: string) {
     if (!live.current || typeof limitsRef.current !== 'number' || !validLabel(label) || !navigator.onLine) return
-    const selectionVersion = epoch.current
-    await refresh()
-    if (selectionVersion !== epoch.current || !live.current || !navigator.onLine || typeof limitsRef.current !== 'number') return
     const source = normalizeLabel(label)
     const maximum = limitsRef.current
     const added: Task[] = files.map(file => {
       const invalid = file.size > maximum ? '文件超过服务器单文件上限' :
         new TextEncoder().encode(file.name).length > 1024 || !file.name || file.name.includes('\0') || file.type.length > 255 ? '文件元数据不符合服务器要求' : ''
-      return { file, sendId: crypto.randomUUID(), attemptId: crypto.randomUUID(), source, name: file.name,
+      const sendId = crypto.randomUUID()
+      if (!invalid) selectedFiles.current.set(sendId, file)
+      return { mime: file.type, sendId, attemptId: crypto.randomUUID(), source, name: file.name,
         size: file.size, progress: 0, status: invalid || '等待上传', pending: false, queued: !invalid, unresolved: false, interrupted: false }
     })
+    // 选择后仍刷新准入限制，但不让等待这个请求的闭包持有整批 File。
+    // loading 会暂停调度；真正开始发送时再按最新限制检查大小。
+    void refresh()
     update([...tasksRef.current, ...added])
   }
-  function remove(sendId: string) { update(tasksRef.current.filter(task => task.sendId !== sendId || !task.queued)) }
+  function remove(sendId: string) {
+    if (!tasksRef.current.some(task => task.sendId === sendId && task.queued)) return
+    selectedFiles.current.delete(sendId)
+    update(tasksRef.current.filter(task => task.sendId !== sendId))
+  }
   function current(task: Task, version: number) {
     const existing = tasksRef.current.find(item => item.sendId === task.sendId)
     return version === epoch.current && live.current && Boolean(existing && !existing.interrupted)
@@ -145,7 +156,7 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
     try {
       const response = await fetch('/api/file-sends', { method: 'POST', credentials: 'same-origin', cache: 'no-store',
         headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
-        body: JSON.stringify({ send_id: task.sendId, attempt_id: task.attemptId, name: task.name, size: task.size, mime: task.file.type, source_label: task.source }) })
+        body: JSON.stringify({ send_id: task.sendId, attempt_id: task.attemptId, name: task.name, size: task.size, mime: task.mime, source_label: task.source }) })
       if (!current(task, version)) return
       if (!response.headers.get('content-type')?.includes('application/json') || response.headers.has('x-filehop-access-layer')) throw Error()
       const value = await response.json()
@@ -195,7 +206,8 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
       if (xhr.current.get(task.sendId) === upload) xhr.current.delete(task.sendId)
       if (current(task, version)) result(task.sendId, unknown, true)
     }
-    upload.send(task.file)
+    upload.send(selectedFiles.current.get(task.sendId))
+    selectedFiles.current.delete(task.sendId)
   }
   function matches(task: Task, value: unknown): value is Message {
     return isMessage(value) && value.kind === 'FILE' && value.send_id === task.sendId &&
@@ -234,6 +246,7 @@ export function useFiles(active: boolean, onExpired: () => void, onMessage: (mes
     const task = tasksRef.current.find(item => item.sendId === sendId)
     if (!live.current || !task?.pending || task.unresolved) return
     // 标记先于 abort，防止迟到准备继续发送文件体；中断不能把可能成功的结果改成失败。
+    selectedFiles.current.delete(sendId)
     patch(sendId, { interrupted: true, pending: false, unresolved: true, status: unknown })
     xhr.current.get(sendId)?.abort()
     controls.current.get(sendId)?.abort()
