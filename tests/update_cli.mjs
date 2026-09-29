@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -33,6 +33,8 @@ const c = JSON.parse(fs.readFileSync(process.env.CONFIG));
 const m = JSON.parse(process.env.MANIFEST);
 fs.appendFileSync(process.env.CALLS, JSON.stringify([tool,...args])+'\\n');
 if (tool === 'gh') {
+ const contender = require('child_process').spawnSync('flock', ['--nonblock', '/run/lock/filehop-update.lock', 'true']);
+ if (contender.status !== 1) process.exit(8);
  if (args[1] === 'view') console.log(JSON.stringify({tagName:m.version,isDraft:false,isPrerelease:false}));
  else fs.writeFileSync(path.join(args[args.indexOf('--dir')+1],'release.json'),JSON.stringify(m));
 } else if (tool === 'curl') {
@@ -42,8 +44,11 @@ if (tool === 'gh') {
 else if (args[0] === 'create') console.log('extract-id');
 else if (args[0] === 'cp') fs.writeFileSync(path.join(args.at(-1),'index.html'),'<html>synthetic</html>');
 else if (args[0] === 'ps') console.log('existing-id');
-else if (args[0] === 'inspect') console.log(JSON.stringify([{Config:{Labels:{'com.docker.compose.service':'backend'}},Mounts:[{Type:'bind',Source:c.databaseDir,Destination:'/data/database'},{Type:'bind',Source:c.filesDir,Destination:'/data/files'}]}]));
-else if (args.includes('migrate') && process.env.FAIL_MIGRATE === 'yes') process.exit(9);
+else if (args[0] === 'inspect') console.log(JSON.stringify([{Config:{Labels:{'com.docker.compose.service':process.env.WRONG_OWNER ? 'other' : 'backend'}},Mounts:[{Type:'bind',Source:c.databaseDir,Destination:'/data/database'},{Type:'bind',Source:c.filesDir,Destination:'/data/files'}]}]));
+else if (args.includes('migrate')) {
+ if (fs.readFileSync(path.join(path.dirname(process.env.CONFIG), 'target.compose.json'), 'utf8') !== process.env.PREVIOUS_COMPOSE) process.exit(10);
+ if (process.env.FAIL_MIGRATE === 'yes') { console.error('Synthetic migration failure'); process.exit(9); }
+}
 `
   for (const tool of ['docker', 'gh', 'curl']) writeFileSync(join(bin, tool), fake, { mode: 0o755 })
   writeFileSync(path, JSON.stringify(config))
@@ -53,11 +58,28 @@ else if (args.includes('migrate') && process.env.FAIL_MIGRATE === 'yes') process
   const locked = spawnSync('flock', ['--nonblock', '/run/lock/filehop-update.lock', process.execPath, cli, 'update', path, 'v1.2.3'], { encoding: 'utf8', env })
   assert.notEqual(locked.status, 0, 'A second updater must fail before downloads')
   assert.ok(!existsSync(log))
+  const forgedLock = spawnSync('flock', ['--nonblock', '/run/lock/filehop-update.lock', process.execPath, cli, 'update', path, 'v1.2.3'], {
+    encoding: 'utf8', env: { ...env, FILEHOP_UPDATE_LOCKED: '1' },
+  })
+  assert.notEqual(forgedLock.status, 0, 'An inherited environment flag must not bypass the real lock')
+  assert.ok(!existsSync(log), 'Lock conflict must not download or invoke Docker even with an inherited flag')
   assert.notEqual(update({ BAD_ARCH: 'yes' }).status, 0)
   assert.ok(!readFileSync(log, 'utf8').includes('"stop"'), 'Invalid architecture must not stop the old backend')
   config.webRoot = join(root, 'web-migration'); mkdirSync(config.webRoot)
   writeFileSync(path, JSON.stringify(config))
+  const activeCompose = join(root, 'target.compose.json')
+  const previousCompose = JSON.stringify({ name: config.project, services: { backend: { image: 'synthetic-previous-image' } } })
+  writeFileSync(activeCompose, previousCompose)
+  env.PREVIOUS_COMPOSE = previousCompose
+  assert.notEqual(update({ WRONG_OWNER: 'yes' }).status, 0)
+  assert.equal(readFileSync(activeCompose, 'utf8'), previousCompose, 'Ownership rejection must preserve runtime configuration')
+  assert.ok(!readFileSync(log, 'utf8').includes('"stop"'))
+  config.webRoot = join(root, 'web-migration-failure'); mkdirSync(config.webRoot)
+  writeFileSync(path, JSON.stringify(config))
   assert.notEqual(update({ FAIL_MIGRATE: 'yes' }).status, 0)
+  assert.ok(readdirSync(root).filter(name => name.startsWith('update-')).some(name =>
+    readFileSync(join(root, name), 'utf8').includes('Synthetic migration failure')), 'Migration diagnostics must remain in the update log')
+  assert.equal(readFileSync(activeCompose, 'utf8'), previousCompose, 'Migration failure must preserve the active runtime configuration')
   const calls = readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse)
   assert.ok(calls.some(args => args.includes('stop')))
   assert.ok(calls.some(args => args.includes('migrate')))
@@ -71,5 +93,6 @@ else if (args.includes('migrate') && process.env.FAIL_MIGRATE === 'yes') process
   const success = update({})
   assert.equal(success.status, 0, success.stderr)
   assert.equal(JSON.parse(readFileSync(join(root, 'current-release.json'))).version, 'v1.2.3')
+  assert.equal(JSON.parse(readFileSync(activeCompose)).services.backend.image, manifest.backend)
   console.log('Update migration failure preserves data and blocks startup; successful smoke records version.')
 } finally { rmSync(root, { recursive: true }) }

@@ -46,7 +46,7 @@ FILEHOP_CONFIRM_STOP=yes node scripts/update.mjs update /srv/filehop-production/
 
 每次执行将输出保留到配置目录中权限 0600 的 `update-<时间>-<进程>.log`（含迁移输出）；锁冲突也返回非零，不执行下载或停服。日志可能含本机路径，仅保留本地，不公开原始日志。
 
-更新生成 `<配置目录>/target.compose.json`，不继承 shell `COMPOSE_*`、工作目录 `.env` 或开发挂载。以后对该生产栈的查询/启停使用这个文件，不再使用残留的旧镜像配置。内部就绪最多等待 60 秒，并检查 HTTPS `/api/status` 及首页内容与目标 index 一致；之后才原子记录 `current-release.json`。脚本不保存凭证或做认证业务写入，操作者仍须刷新页面并走一次登录、文本、上传下载/删除的日常路径。
+更新生成 `<配置目录>/target.compose.json`，不继承 shell `COMPOSE_*`、工作目录 `.env` 或开发挂载。以后对该生产栈的查询/启停使用这个文件，不再使用残留的旧镜像配置。内部就绪最多等待 60 秒，并检查 HTTPS `/api/status` 及首页内容与目标 index 一致；之后才原子记录 `current-release.json`。脚本不保存凭证或做认证业务写入，操作者仍须刷新页面并走一次登录、文本、上传下载/删除的日常路径。迁移成功前，目标配置保存在配置目录的 `pending-<版本>-<进程>.compose.json`，不会覆盖日常使用的 `target.compose.json`；成功后才原子替换运行配置。失败保留 pending 文件供排障，不直接用它启动服务。
 
 前端完整提取后才切换，不暴露半套资源。已有目标版本目录拒绝覆盖（包括失败残留），更新并不是可恢复状态机。不得手动删除目录后无脑重跑；先调查实际镜像、结构、资源和运行状态，再明确下一步。
 
@@ -65,7 +65,7 @@ prod=(docker compose --env-file /dev/null --project-directory /srv/filehop-produ
 "${prod[@]}" exec backend filehop reset-password
 ```
 
-更新失败立即停止后续步骤：保留挂载、容器日志、目标目录和目标 Compose；不自动回滚、清库、重写 SQLx checksum、重新初始化或重复迁移。迁移失败时旧服务保持停止；启动/冒烟失败时目标服务可能仍在运行或重启循环，先查日志，必要时用目标 Compose `stop backend`，**不要启动旧版本写入可能已升级的结构**。诊断期间站点可能不可用或静态资源已切换，这不是成功。
+更新失败立即停止后续步骤：保留挂载、容器日志、目标目录和 Compose 配置；迁移失败时 `target.compose.json` 仍是之前的配置（首次使用更新工具时可能尚不存在），保留它不代表允许启动旧版本；不自动回滚、清库、重写 SQLx checksum、重新初始化或重复迁移。迁移失败时旧服务保持停止；启动/冒烟失败时目标服务可能仍在运行或重启循环，先查日志，必要时用目标 Compose `stop backend`，**不要启动旧版本写入可能已升级的结构**。诊断期间站点可能不可用或静态资源已切换，这不是成功。
 
 检查：目标来源/digest、真实挂载和 UID/GID、其他持锁进程、磁盘空间、已有迁移 checksum、固定后端地址、Caddy 的静态链接和精确 Origin。锁由进程退出释放，不删除存储身份文件解锁。日志轮转沿用 10 MiB × 3；不把 `unhealthy` 当自动重启。
 
