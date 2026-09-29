@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 import { execFileSync, spawnSync } from 'node:child_process'
-import { readFileSync, writeFileSync, realpathSync, statSync, existsSync, mkdirSync, renameSync, symlinkSync, openSync, closeSync } from 'node:fs'
+import { readFileSync, writeFileSync, realpathSync, statSync, existsSync, mkdirSync, renameSync, symlinkSync, openSync, appendFileSync } from 'node:fs'
 import { dirname, resolve, isAbsolute, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { isIPv4 } from 'node:net'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const [command, configPath, version] = process.argv.slice(2)
-const output = (tool, args, options = {}) => execFileSync(tool, args, { encoding: 'utf8', ...options }).trim()
-const run = (tool, args, options = {}) => execFileSync(tool, args, { stdio: 'inherit', ...options })
+let log
+const output = (tool, args, options = {}) => execFileSync(tool, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', log ?? 'inherit'], ...options }).trim()
+const run = (tool, args, options = {}) => execFileSync(tool, args, { stdio: ['inherit', log ?? 'inherit', log ?? 'inherit'], ...options })
 let stopped = false
 try {
   if (!['check', 'update'].includes(command) || !isAbsolute(configPath ?? '')) throw Error('Usage: update.mjs check|update /absolute/production.json vMAJOR.MINOR.PATCH')
@@ -30,18 +31,15 @@ try {
   const configDir = dirname(realpathSync(configPath))
   if (paths.some(path => configDir === path || configDir.startsWith(path + sep))) throw Error('Configuration and logs must stay outside storage and static directories')
   if (command === 'check') { console.log('Configuration valid; runtime and network not checked.'); process.exit(0) }
-  // 全机一把锁而非按版本加锁，避免不同配置或版本同时停服、迁移；进程退出后由内核释放。
-  if (process.env.FILEHOP_UPDATE_LOCKED !== '1') {
-    const logPath = resolve(dirname(realpathSync(configPath)), `update-${Date.now()}-${process.pid}.log`)
-    const log = openSync(logPath, 'wx', 0o600)
-    console.log(`Update output retained in ${logPath}`)
-    const result = spawnSync('flock', ['--nonblock', '/run/lock/filehop-update.lock', process.execPath, fileURLToPath(import.meta.url), ...process.argv.slice(2)],
-      { stdio: ['ignore', log, log], env: { ...process.env, FILEHOP_UPDATE_LOCKED: '1' } })
-    closeSync(log)
-    if (result.error) throw result.error
-    console.log(result.status === 0 ? 'Update completed. Refresh Web and verify the daily exchange path.' : 'Update failed or another update holds the lock. Inspect the retained log; do not blindly rerun.')
-    process.exit(result.status ?? 1)
-  }
+  const logPath = resolve(configDir, `update-${Date.now()}-${process.pid}.log`)
+  log = openSync(logPath, 'wx', 0o600)
+  console.log(`Update output retained in ${logPath}`)
+  // flock 子进程与本进程共享同一个打开的文件描述；子进程退出后，本进程仍持锁。
+  // 不用环境变量证明持锁，也不递归执行更新；锁描述符一直保留到本进程退出。
+  const lock = openSync('/run/lock/filehop-update.lock', 'a')
+  const locked = spawnSync('flock', ['--nonblock', '3'], { stdio: ['ignore', log, log, lock] })
+  if (locked.error) throw locked.error
+  if (locked.status !== 0) throw Error('Another update holds the lock; no update operations performed')
   console.log('Confirm transfers have ended and drafts are saved. Refresh Web after completion. No automatic rollback.')
   if (process.env.FILEHOP_CONFIRM_STOP !== 'yes') throw Error('Set FILEHOP_CONFIRM_STOP=yes after ending transfers and saving drafts')
   const state = dirname(realpathSync(configPath))
@@ -69,10 +67,12 @@ try {
     networks: { ingress: { ipv4_address: c.backendIp, aliases: ['filehop-prod-backend'] } },
     logging: { driver: 'json-file', options: { 'max-size': '10m', 'max-file': '3' } },
   } }, networks: { ingress: { external: true, name: c.network } } }
-  writeFileSync(composeFile, JSON.stringify(compose, null, 2), { mode: 0o600 })
+  // 待迁移配置仅用于校验和停服；迁移成功前不能覆盖日常运行入口，避免失败后误启新版本。
+  const pendingCompose = resolve(state, `pending-${version}-${process.pid}.compose.json`)
+  writeFileSync(pendingCompose, JSON.stringify(compose, null, 2), { mode: 0o600, flag: 'wx' })
   // 不接受 shell 的 Compose 覆盖项；所有持久路径来自上述显式配置，不从源码目录推导。
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('COMPOSE_')))
-  const args = ['compose', '--env-file', '/dev/null', '--project-directory', state, '-p', c.project, '-f', composeFile]
+  const args = ['compose', '--env-file', '/dev/null', '--project-directory', state, '-p', c.project, '-f', pendingCompose]
   const dc = (...tail) => run('docker', [...args, ...tail], { env })
   dc('config', '--quiet')
   const ids = output('docker', ['ps', '-aq', '--filter', `label=com.docker.compose.project=${c.project}`]).split('\n').filter(Boolean)
@@ -86,6 +86,9 @@ try {
   run('docker', ['run', '--rm', '--network', 'none',
     '--mount', `type=bind,src=${c.databaseDir},dst=/data/database`,
     '--mount', `type=bind,src=${c.filesDir},dst=/data/files`, manifest.backend, 'migrate'])
+  // 数据已由目标镜像迁移成功后，才原子替换运行配置；后续启动失败也保留目标配置供排障。
+  renameSync(pendingCompose, composeFile)
+  args[args.length - 1] = composeFile
   // 完整资源提取完成后用原子符号链接切换；共享 Caddy 配置始终指向 webRoot/current。
   const link = resolve(c.webRoot, `.current-${process.pid}`)
   symlinkSync(target, link)
@@ -106,9 +109,13 @@ try {
   if (html !== readFileSync(resolve(target, 'index.html'), 'utf8').trim()) throw Error('HTTPS static version mismatch')
   writeFileSync(resolve(state, 'current-release.json.tmp'), JSON.stringify(manifest, null, 2), { mode: 0o600 })
   renameSync(resolve(state, 'current-release.json.tmp'), resolve(state, 'current-release.json'))
-  console.log(`Updated to ${version} (${manifest.sha}). Refresh Web and verify your daily exchange path.`)
+  const completed = `Updated to ${version} (${manifest.sha}). Refresh Web and verify your daily exchange path.`
+  appendFileSync(log, completed + '\n')
+  console.log(completed)
 } catch (error) {
+  const guidance = stopped ? 'Update stopped after stopping the old backend. Preserve data/logs; inspect the target manually. Do not restart the old version or blindly rerun.' : 'Update aborted. Preserve downloaded artifacts and inspect configuration.'
+  if (log !== undefined) appendFileSync(log, `${error.message}\n${guidance}\n`)
   console.error(error.message)
-  console.error(stopped ? 'Update stopped after stopping the old backend. Preserve data/logs; inspect the target manually. Do not restart the old version or blindly rerun.' : 'Update aborted. Preserve downloaded artifacts and inspect configuration.')
+  console.error(guidance)
   process.exitCode = 1
 }
