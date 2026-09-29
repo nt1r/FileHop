@@ -1,6 +1,6 @@
 # Spec 002：桌面文件传输与容量控制
 
-状态：原桌面版本已验收；单轮发送与串行交互已随 [Spec 007](007-implemented-flow-simplification.md) B 实现，登录到期清空等待项/File 引用等 C 收缩仍待实施。旧版证据见 [#33](https://github.com/nt1r/FileHop/issues/33)，不代表新行为的验收证据。
+状态：原桌面版本已验收；单轮发送与串行交互及登录失效后清空等待项/File 引用已随 [Spec 007](007-implemented-flow-simplification.md) B/C 实现，稳定版桌面 Chrome 人工确认待完成。旧版证据见 [#33](https://github.com/nt1r/FileHop/issues/33)，不代表新行为的验收证据。
 
 本文是文件传输的唯一行为契约；Spec 007 只组织改造。关联：[产品基线](../product.md) · [Spec 001](001-desktop-text-loop.md) · [Spec 003](003-server-file-management.md) · [路线图](../roadmap.md)。
 

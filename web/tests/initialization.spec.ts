@@ -62,7 +62,7 @@ test('administrator initializes storage and the page observes the real status', 
   await arrived
   await page.clock.fastForward(10_000)
   await expect(page.getByRole('region', { name: '消息流' })).toHaveCount(0)
-  await expect(page.getByRole('status')).toContainText('登录已到期')
+  await expect(page.getByRole('status')).toContainText('登录已失效')
   const lateResponse = page.waitForResponse('**/api/session')
   releaseRead()
   await lateResponse
