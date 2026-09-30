@@ -176,19 +176,31 @@ prod=(docker compose --env-file /srv/filehop-isolated/production.env \
 
 长期运行的开发站点应使用固定目录中的源码快照或专用普通 clone，不从可删除的 linked worktree 部署。`web/src` 是运行中的只读 bind mount，删除宿主源码会导致页面模块加载失败；数据库和文件目录也不能随 worktree 清理。固定目录仍需由操作者保留，脚本无法防止运行期间的外部删除。
 
-仓库提供统一入口 `scripts/dev.sh`，由 Compose 协调前后端，不分别维护两个启动脚本。显式指定已准备好的绝对部署目录及入口类型：
+仓库提供统一入口 `scripts/dev.sh`，由 Compose 协调前后端，不分别维护两个启动脚本。目录、入口类型和动作都可省略：
 
 ```bash
+# 默认识别已有 filehop-dev 项目的目录和 host/container，完整部署当前分支的前后端。
+# 包含当前工作区未提交修改；可能停机，执行前保存草稿、结束传输。
+bash scripts/dev.sh
+# 仅启动已部署版本，不更新源码（不能用于失败迁移后的自动恢复）。
+bash scripts/dev.sh start
+# 仅有 UI 变更且构建输入一致时，可选择轻量同步。
+bash scripts/dev.sh sync
+bash scripts/dev.sh status
+bash scripts/dev.sh stop
 # 路径为示例，替换成操作者确认的固定开发目录。
 bash scripts/dev.sh /srv/filehop-dev host check
-bash scripts/dev.sh /srv/filehop-dev host status
-bash scripts/dev.sh /srv/filehop-dev host start
-bash scripts/dev.sh /srv/filehop-dev host stop
 ```
 
-从代码仓库调用脚本，参数指向固定部署目录；两者可以分离，无需向部署目录复制另一套管理脚本。选择与现有入口一致的模式：`host` 使用宿主 overlay，`container` 使用基础 Compose。项目名固定为 `filehop-dev`，每个 Docker daemon 仅管理这一套开发栈。
+从代码仓库调用脚本，参数指向固定部署目录；两者可以分离，无需向部署目录复制另一套管理脚本。选择与现有入口一致的模式：`host` 使用宿主 overlay，`container` 使用基础 Compose。省略目录时从已有项目识别；没有项目时须显式提供目录。省略模式时从已有项目配置判断；没有项目时按部署目录是否存在 `compose.host.yml` 判断。项目名固定为 `filehop-dev`，每个 Docker daemon 仅管理这一套开发栈。
 
-脚本只管理已有部署：启动使用已有镜像，停止保留容器和数据；构建、版本更新和账户初始化走下述独立流程。操作前核对同名项目所有容器（包括已停止容器）的部署目录、入口配置、服务及实际挂载；不匹配时拒绝操作，迁移必须另行确认。检查与操作之间仍需避免其他操作者并发修改该项目。路径检查细节以脚本为准。配置或目录损坏导致管理命令拒绝执行时，先核实项目归属再直接用 Docker 诊断，不能自动补建目录掩盖数据缺失。
+`sync` 只覆盖部署目录中被只读挂载的 `web/src`、`web/index.html` 和 `web/vite.config.ts`，然后用已有镜像拉起服务并重启前端；不构建镜像，不迁移数据，也不改动 `.env` 或 `data-dev/`。复制前拒绝 Web 写入目标中的符号链接别名，以及目标与数据库、附件目录或 `.env` 的重叠（包括相互嵌套）。后端源码、迁移、Cargo manifest/锁文件、前后端 Dockerfile、Web manifest/锁文件须与固定部署快照一致；缺失或有差异时，在写入前拒绝轻量同步，提示走完整更新流程，不自动升级或绕过检查。这是保守的构建输入检查，不是 API 兼容证明，也不能证明已有镜像确实来自该快照；完整更新时仍须核对镜像与源码一致，不能只复制构建输入来骗过检查。
+
+省略动作等同 `deploy`：锁定固定开发目录，从调用脚本所在仓库创建当前分支的源码快照（含未提交修改、非忽略的新文件，排除 `.env*`、依赖和构建缓存），构建前后端镜像。构建成功后停止旧服务，使用目标后端镜像及原数据挂载运行独立 `migrate`；迁移成功后同步前后端应用输入、保留 `.env`、`data-dev/` 和本地记录，重建两服务容器，限时检查内部后端就绪和前端入口模块。网络、Compose 挂载和入口配置沿用既有配置，Compose 有差异需另行审阅，脚本不修改 Caddy 或网络。
+
+构建失败不停止旧服务；迁移失败保持服务停止，不同步新前端、不自动回滚或启动旧后端，不执行 `init`、清库、改写 checksum。启动检查失败保留数据和日志并报告失败。当前开发库若依赖曾被改写的迁移，自动部署仍会被真实迁移校验拒绝，必须人工解决兼容性，不能用重新初始化绕过。
+
+显式 `start` 仅启动已有镜像；`stop`、`status` 和 `check` 不复制源码。显式 `sync` 遇到 `Full development update required` 时用无参调用或 `deploy` 更新完整前后端，而不是绕过检查。首次账户初始化仍由操作者单独执行。Docker 项目枚举失败即退出，不当作空项目继续操作。操作前核对同名项目所有容器（包括已停止容器）的部署目录、入口配置、服务及实际挂载；不匹配时拒绝操作，迁移必须另行确认。检查与操作之间仍需避免其他操作者并发修改该项目。路径检查细节以脚本为准。配置或目录损坏导致管理命令拒绝执行时，先核实项目归属再直接用 Docker 诊断，不能自动补建目录掩盖数据缺失。
 
 执行前确认 Docker context 和 Shell 中的 Compose 配置变量指向目标开发实例；Shell 同名变量可覆盖 `.env`。`check` 通过只表示路径和 Compose 配置合法，服务健康和数据状态仍须复验。
 
@@ -200,7 +212,7 @@ bash scripts/dev.sh /srv/filehop-dev host stop
 
 脚本和测试纳入版本管理；实际配置、凭证、数据库、文件和 `DEPLOYED_COMMIT` 留在部署目录，不提交。
 
-本地验证：`bash tests/dev_script.sh` 检查公开 CLI 拒绝路径及 Docker 调用参数（使用假 Docker，不接触运行栈）；真实 Compose 配置和容器能力由既有配置检查与隔离冒烟验证，不把 CLI 测试当作容器启动证据。
+本地验证：`bash tests/dev_script.sh` 检查公开 CLI、无参完整部署及参数省略、构建/停服/迁移/启动顺序、构建与迁移失败的停止边界、Docker 枚举失败（含部分输出）、路径别名/数据重叠、轻量同步的构建输入差异及拒绝时无写入/生命周期操作（使用假 Docker 和一次性合成目录，不接触运行栈）；真实 Compose 配置和容器能力由既有配置检查与隔离冒烟验证，不把 CLI 测试当作容器启动证据。
 
 ## GitHub Actions 检查分层
 

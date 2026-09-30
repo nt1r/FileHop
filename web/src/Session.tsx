@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { ArrowClockwiseIcon, SignInIcon, SignOutIcon } from '@phosphor-icons/react'
+import { ArrowClockwiseIcon, ChatsIcon, ClockCountdownIcon, FolderIcon, InfoIcon, ShieldCheckIcon, SignInIcon, SignOutIcon, WarningCircleIcon } from '@phosphor-icons/react'
 import { Button } from '@cloudflare/kumo/components/button'
 import { Input } from '@cloudflare/kumo/components/input'
 import { LayerCard } from '@cloudflare/kumo/components/layer-card'
@@ -53,7 +53,7 @@ async function request(method: 'GET' | 'POST' | 'DELETE', credentials?: { userna
   return value as Session
 }
 
-export default function SessionPage() {
+export default function SessionPage({ onAuthenticatedChange }: { onAuthenticatedChange?: (authed: boolean) => void } = {}) {
   const [page, setPage] = useState<'messages' | 'files'>('messages')
   const [phase, setPhase] = useState<Phase>('checking')
   const [message, setMessage] = useState('正在恢复登录…')
@@ -69,6 +69,10 @@ export default function SessionPage() {
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const exchange = useMessages(phase === 'authenticated', expire)
   const files = useFiles(phase === 'authenticated', expire, exchange.receivedFile, exchange.refreshFileStates)
+
+  useEffect(() => {
+    onAuthenticatedChange?.(phase === 'authenticated')
+  }, [phase, onAuthenticatedChange])
 
   useEffect(() => {
     const remaining = retryAt - Date.now()
@@ -221,44 +225,121 @@ export default function SessionPage() {
     }
   }
 
-  return <section className="workspace">
-    {phase === 'login' && <LayerCard className="panel">
-      <div className="panel-heading">
-        <div>
-          <Text variant="heading3" as="h2">登录</Text>
-          <Text variant="secondary">进入你的私人消息流。</Text>
-        </div>
+  const isError = message.includes('错误') || message.includes('过多') || message.includes('失效') || message.includes('未确认') || phase === 'unknown' || phase === 'logout-pending'
+  const isWarning = message.includes('过多')
+  const statusVariant = isWarning ? 'warning' : isError ? 'error' : 'info'
+  const statusTextVariant = isError ? 'error' : 'secondary'
+
+  return <>
+    {phase === 'login' && <LayerCard className="auth-card login-card">
+      <div className="auth-card-header">
+        <Text variant="heading" as="h2">登录</Text>
+        <Text variant="secondary" size="sm">进入你的私人消息流</Text>
       </div>
-      <Text role="status" variant={message.includes('错误') || message.includes('过多') ? 'error' : 'secondary'}>{message}</Text>
+      <div className={`auth-status-callout ${statusVariant}`}>
+        {isWarning ? (
+          <ClockCountdownIcon size={18} weight="fill" className="status-callout-icon" />
+        ) : isError ? (
+          <WarningCircleIcon size={18} weight="fill" className="status-callout-icon" />
+        ) : (
+          <InfoIcon size={18} weight="fill" className="status-callout-icon" />
+        )}
+        <Text role="status" variant={statusTextVariant}>{message}</Text>
+      </div>
       <form className="login-form" onSubmit={login}>
-        <Input label="用户名" autoComplete="username" value={username} onChange={e => setUsername(e.target.value)} required />
-        <Input label="密码" type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} required />
-        <div className="action-row">
-          <Button type="submit" variant="primary" icon={<SignInIcon />} disabled={busy || !retryReady}>登录</Button>
+        <div className="form-field">
+          <Input
+            label="用户名"
+            size="lg"
+            autoComplete="username"
+            placeholder="输入管理员用户名"
+            value={username}
+            onChange={e => setUsername(e.target.value)}
+            required
+          />
         </div>
+        <div className="form-field">
+          <Input
+            label="密码"
+            type="password"
+            size="lg"
+            autoComplete="current-password"
+            placeholder="输入账户密码"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            required
+          />
+        </div>
+        <Button
+          type="submit"
+          variant="primary"
+          size="lg"
+          className="login-submit-btn"
+          icon={<SignInIcon size={18} weight="bold" />}
+          disabled={busy || !retryReady}
+        >
+          {busy ? '正在登录…' : !retryReady ? '稍后重试' : '登录'}
+        </Button>
       </form>
-    </LayerCard>}
-    {phase !== 'login' && phase !== 'authenticated' && <LayerCard className="panel status-panel">
-      <Text role="status" variant={phase === 'unknown' || phase === 'logout-pending' ? 'error' : 'secondary'}>{message}</Text>
-      <div className="action-row">
-        {phase === 'logout-pending' && <Button variant="primary" icon={<SignOutIcon />} disabled={busy} onClick={() => void logout()}>重试退出</Button>}
-        {phase === 'unknown' && <Button variant="secondary" icon={<ArrowClockwiseIcon />} disabled={busy} onClick={() => void check()}>检查登录状态</Button>}
-      </div>
-    </LayerCard>}
-    {phase === 'authenticated' && <>
-      <div className="panel-heading">
-        <Text role="status" variant="success">{message}</Text>
-        <div className="action-row">
-          <Button variant="ghost" icon={<ArrowClockwiseIcon />} disabled={busy} onClick={() => void check()}>检查登录状态</Button>
-          <Button variant="secondary" icon={<SignOutIcon />} onClick={() => void logout()}>退出登录</Button>
+      <div className="auth-card-footer">
+        <div className="auth-feature-pill">
+          <ShieldCheckIcon size={16} weight="duotone" />
+          <span>单人自用 · 12 小时安全会话 · 无公开注册</span>
         </div>
       </div>
-      <nav className="action-row" aria-label="工作区导航">
-        <Button variant={page === 'messages' ? 'primary' : 'secondary'} aria-pressed={page === 'messages'} onClick={() => setPage('messages')}>消息工作区</Button>
-        <Button variant={page === 'files' ? 'primary' : 'secondary'} aria-pressed={page === 'files'} onClick={() => setPage('files')}>服务器文件</Button>
+    </LayerCard>}
+    {phase !== 'login' && phase !== 'authenticated' && <LayerCard className="auth-card status-card">
+      <div className="auth-card-header">
+        <Text variant="heading" as="h2">
+          {phase === 'logout-pending' ? '退出待确认' : phase === 'unknown' ? '验证登录状态' : '恢复会话'}
+        </Text>
+        <div className={`auth-status-callout ${phase === 'unknown' || phase === 'logout-pending' ? 'error' : 'info'}`}>
+          {phase === 'unknown' || phase === 'logout-pending' ? (
+            <WarningCircleIcon size={18} weight="fill" className="status-callout-icon" />
+          ) : (
+            <InfoIcon size={18} weight="fill" className="status-callout-icon" />
+          )}
+          <Text role="status" variant={phase === 'unknown' || phase === 'logout-pending' ? 'error' : 'secondary'}>{message}</Text>
+        </div>
+      </div>
+      <div className="action-row centered">
+        {phase === 'logout-pending' && <Button variant="primary" size="lg" icon={<SignOutIcon />} disabled={busy} onClick={() => void logout()}>重试退出</Button>}
+        {phase === 'unknown' && <Button variant="secondary" size="lg" icon={<ArrowClockwiseIcon />} disabled={busy} onClick={() => void check()}>检查登录状态</Button>}
+      </div>
+    </LayerCard>}
+    {phase === 'authenticated' && <section className="workspace">
+      <div className="panel-heading workspace-header">
+        <div className="session-status-badge">
+          <span className="status-dot online" />
+          <Text role="status" variant="success">{message}</Text>
+        </div>
+        <div className="action-row">
+          <Button variant="ghost" size="sm" icon={<ArrowClockwiseIcon />} disabled={busy} onClick={() => void check()}>检查登录状态</Button>
+          <Button variant="secondary" size="sm" icon={<SignOutIcon />} onClick={() => void logout()}>退出登录</Button>
+        </div>
+      </div>
+      <nav className="workspace-tab-nav" aria-label="工作区导航">
+        <Button
+          variant={page === 'messages' ? 'primary' : 'secondary'}
+          size="sm"
+          icon={<ChatsIcon size={16} weight={page === 'messages' ? 'fill' : 'regular'} />}
+          aria-pressed={page === 'messages'}
+          onClick={() => setPage('messages')}
+        >
+          消息工作区
+        </Button>
+        <Button
+          variant={page === 'files' ? 'primary' : 'secondary'}
+          size="sm"
+          icon={<FolderIcon size={16} weight={page === 'files' ? 'fill' : 'regular'} />}
+          aria-pressed={page === 'files'}
+          onClick={() => setPage('files')}
+        >
+          服务器文件
+        </Button>
       </nav>
       {/* 草稿、发送与上传调度由会话层持有，切换视图不改变认证或任务生命周期。 */}
       {page === 'messages' ? <Messages exchange={exchange} files={files} /> : <ServerFiles files={files} exchange={exchange} onExpired={expire} />}
-    </>}
-  </section>
+    </section>}
+  </>
 }
