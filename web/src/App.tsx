@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ArrowsClockwiseIcon, DesktopIcon, DeviceMobileIcon, ShieldCheckIcon } from '@phosphor-icons/react'
+import { ArrowsClockwiseIcon, HardDrivesIcon, InfoIcon, PaperPlaneTiltIcon, WarningCircleIcon } from '@phosphor-icons/react'
 import { Badge } from '@cloudflare/kumo/components/badge'
 import { Button } from '@cloudflare/kumo/components/button'
 import { LayerCard } from '@cloudflare/kumo/components/layer-card'
@@ -17,7 +17,9 @@ const messages: Record<State, string> = {
 
 export default function App() {
   const [state, setState] = useState<State>('loading')
+  const [authenticated, setAuthenticated] = useState(false)
   const [attempt, setAttempt] = useState(0)
+
   useEffect(() => {
     const controller = new AbortController()
     let active = true
@@ -44,49 +46,95 @@ export default function App() {
     return () => { active = false; window.clearTimeout(timer); controller.abort() }
   }, [attempt])
 
+  const isWorkspace = state === 'initialized' && authenticated
+
   return (
-    <main className="app-shell">
-      <header className="masthead">
-        <div className="brand-lockup">
-          <div className="brand-mark">
-            <Badge variant="primary">FileHop</Badge>
-            <Text variant="secondary" size="sm">私人桌面工作台</Text>
+    <main className={`app-shell ${isWorkspace ? 'workspace-mode' : 'auth-mode'}`}>
+      {isWorkspace && (
+        <header className="masthead">
+          <div className="brand-lockup">
+            <div className="brand-mark">
+              <div className="brand-icon-mini">
+                <PaperPlaneTiltIcon size={18} weight="fill" />
+              </div>
+              <Text variant="heading" as="h1">FileHop</Text>
+            </div>
+            <Badge variant="secondary">私人工作台</Badge>
           </div>
-          <Text variant="heading" as="p" size="lg">一台服务器，连接你的桌面。</Text>
-        </div>
-        <Badge variant={state === 'storage_error' || state === 'unavailable' ? 'outline' : 'secondary'}>
-          {state === 'initialized' ? '服务已初始化' : state === 'loading' ? '正在连接' : '等待管理员'}
-        </Badge>
-      </header>
+        </header>
+      )}
 
-      <div className="stage">
-        <section className="intro">
-          <Text variant="secondary" size="sm" bold>DESKTOP WEB</Text>
-          <Text variant="heading" as="h1" DANGEROUS_className="intro-title">跨设备文本与文件交换</Text>
-          <Text variant="secondary" size="lg">在自己的服务器上传递文字、链接、命令片段和文件。所有设备共享同一条私人消息流。</Text>
-          <ul className="capability-list">
-            <li><DesktopIcon size={22} /><Text>桌面浏览器直接登录、阅读和发送。</Text></li>
-            <li><DeviceMobileIcon size={22} /><Text>Android 使用同一条历史，无需选择接收设备。</Text></li>
-            <li><ShieldCheckIcon size={22} /><Text>账户只由服务器管理员初始化，页面不提供注册。</Text></li>
-          </ul>
-        </section>
+      <div className={isWorkspace ? 'workspace-stage' : 'auth-container'}>
+        {!isWorkspace && (
+          <div className="auth-brand-header">
+            <div className="brand-logo-emblem">
+              <PaperPlaneTiltIcon size={28} weight="fill" />
+            </div>
+            <Text variant="heading" as="h1" size="lg" DANGEROUS_className="auth-brand-title">FileHop</Text>
+            <Text variant="secondary" size="sm" DANGEROUS_className="auth-brand-subtitle">
+              跨设备文本与文件交换 · 私人桌面工作台
+            </Text>
+          </div>
+        )}
 
-        <div className="workspace">
-          {state === 'initialized' ? <SessionPage /> : <LayerCard className="panel status-panel">
-            <div>
-              <Text variant="heading3" as="h2">服务状态</Text>
-              <Text role="status" variant={state === 'storage_error' || state === 'unavailable' ? 'error' : 'secondary'}>{messages[state]}</Text>
+        {state === 'initialized' ? (
+          <SessionPage onAuthenticatedChange={setAuthenticated} />
+        ) : (
+          <LayerCard className="auth-card status-card">
+            <div className="auth-card-header">
+              <div className="auth-card-title-row">
+                {state === 'storage_error' ? (
+                  <WarningCircleIcon size={24} weight="fill" className="text-danger" />
+                ) : (
+                  <HardDrivesIcon size={24} weight="duotone" className="text-brand" />
+                )}
+                <div>
+                  <Text variant="heading" as="h2">服务状态</Text>
+                  <Text variant="secondary" size="sm">
+                    {state === 'uninitialized' ? '等待管理员在服务器端初始化' : state === 'storage_error' ? '检测到受管存储异常' : '连接服务器中'}
+                  </Text>
+                </div>
+              </div>
+              <div className={`auth-status-callout ${state === 'storage_error' || state === 'unavailable' ? 'error' : 'info'}`}>
+                {state === 'storage_error' || state === 'unavailable' ? (
+                  <WarningCircleIcon size={18} weight="fill" className="status-callout-icon" />
+                ) : (
+                  <InfoIcon size={18} weight="fill" className="status-callout-icon" />
+                )}
+                <Text role="status" variant={state === 'storage_error' || state === 'unavailable' ? 'error' : 'secondary'}>
+                  {messages[state]}
+                </Text>
+              </div>
             </div>
-            {/* 已初始化后由会话页处理重试，不能用诊断刷新重新挂载会话页，绕过内存中的退出待确认状态。 */}
-            <div className="action-row">
-              <Button variant="primary" icon={<ArrowsClockwiseIcon />} disabled={state === 'loading'} onClick={() => {
-                setState('loading')
-                setAttempt((value) => value + 1)
-              }}>刷新状态</Button>
+            {state === 'uninitialized' && (
+              <Text variant="secondary" size="sm" DANGEROUS_className="auth-guide-text">
+                初始化只能由管理员在服务器上执行，不会因打开页面自动创建账户或数据库。
+              </Text>
+            )}
+            <div className="action-row centered">
+              <Button
+                variant="primary"
+                size="lg"
+                icon={<ArrowsClockwiseIcon />}
+                disabled={state === 'loading'}
+                onClick={() => {
+                  setState('loading')
+                  setAttempt((value) => value + 1)
+                }}
+              >
+                刷新状态
+              </Button>
             </div>
-          </LayerCard>}
-          <Text variant="secondary" size="sm">初始化只能由管理员在服务器上执行，不会因打开页面自动创建账户或数据库。</Text>
-        </div>
+          </LayerCard>
+        )}
+
+        {!isWorkspace && (
+          <footer className="auth-footer">
+            <Text variant="secondary" size="sm">
+              账户由服务器管理员初始化 · 页面不提供公开注册
+            </Text>
+          </footer>
+        )}
       </div>
     </main>
   )

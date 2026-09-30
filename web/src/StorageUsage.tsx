@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { HardDriveIcon } from '@phosphor-icons/react'
 import { Text } from '@cloudflare/kumo/components/text'
 
 type Usage = { quota_bytes: string; saved_bytes: string; reserved_bytes: string; cleaning_bytes: string; available_bytes: string; over_quota: boolean }
@@ -52,19 +53,46 @@ export default function StorageUsage({ refresh, onExpired }: { refresh: number; 
     // 切页、认证失效或退出均卸载面板。旧认证周期的响应不得重新展示私人用量。
     return () => { alive = false; generation++; document.removeEventListener('visibilitychange', visible) }
   }, [refresh])
+
   const bytes = (value: string) => `${BigInt(value).toLocaleString('zh-CN')} 字节`
+
+  const quota = usage ? BigInt(usage.quota_bytes) : 0n
+  const saved = usage ? BigInt(usage.saved_bytes) : 0n
+  const reserved = usage ? BigInt(usage.reserved_bytes) : 0n
+  const cleaning = usage ? BigInt(usage.cleaning_bytes) : 0n
+  const used = saved + reserved + cleaning
+  const pct = quota > 0n ? Math.min(100, Math.round(Number((used * 1000n) / quota) / 10)) : 0
+  const savedPct = quota > 0n ? Math.min(100, Number((saved * 1000n) / quota) / 10) : 0
+  const reservedPct = quota > 0n ? Math.min(100, Number((reserved * 1000n) / quota) / 10) : 0
+  const cleaningPct = quota > 0n ? Math.min(100, Number((cleaning * 1000n) / quota) / 10) : 0
+
   return <section aria-label="应用文件额度" className="storage-usage">
-    <Text variant="heading3" as="h3">应用文件额度</Text>
+    <div className="storage-heading-row">
+      <div className="storage-title-group">
+        <HardDriveIcon size={20} className="text-brand" />
+        <Text variant="heading3" as="h3">应用文件额度</Text>
+      </div>
+      {usage && (
+        <div className="storage-percentage-badge">
+          已用 {pct}%
+        </div>
+      )}
+    </div>
     <Text variant="secondary" size="sm">不是整台服务器磁盘用量；实际磁盘不足由具体操作单独提示。用量是快照，上传仍由服务器原子检查准入。</Text>
     {busy && <Text role="status">正在读取用量…</Text>}
     {notice && <Text role="status" variant="error">{notice}</Text>}
     {usage && <>
+      <div className="storage-meter-track" role="meter" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="存储配额使用比例">
+        <div className="storage-meter-fill saved" style={{ width: `${savedPct}%` }} title={`已保存: ${savedPct}%`} />
+        <div className="storage-meter-fill reserved" style={{ width: `${reservedPct}%` }} title={`上传预留: ${reservedPct}%`} />
+        <div className="storage-meter-fill cleaning" style={{ width: `${cleaningPct}%` }} title={`待清理占用: ${cleaningPct}%`} />
+      </div>
       <dl className="storage-values">
-        <div><dt>总额度：</dt><dd>{bytes(usage.quota_bytes)}</dd></div>
-        <div><dt>已保存文件：</dt><dd>{bytes(usage.saved_bytes)}</dd></div>
-        <div><dt>上传预留：</dt><dd>{bytes(usage.reserved_bytes)}</dd></div>
-        <div><dt>待清理占用：</dt><dd>{bytes(usage.cleaning_bytes)}</dd></div>
-        <div><dt>可用额度：</dt><dd>{bytes(usage.available_bytes)}</dd></div>
+        <div className="storage-stat-card"><dt>总额度：</dt><dd>{bytes(usage.quota_bytes)}</dd></div>
+        <div className="storage-stat-card saved"><dt>已保存文件：</dt><dd>{bytes(usage.saved_bytes)}</dd></div>
+        <div className="storage-stat-card reserved"><dt>上传预留：</dt><dd>{bytes(usage.reserved_bytes)}</dd></div>
+        <div className="storage-stat-card cleaning"><dt>待清理占用：</dt><dd>{bytes(usage.cleaning_bytes)}</dd></div>
+        <div className="storage-stat-card available"><dt>可用额度：</dt><dd>{bytes(usage.available_bytes)}</dd></div>
       </dl>
       {usage.over_quota && <Text role="status" variant="error">当前占用已超过配置额度，可用额度为 0；不会自动删除文件。</Text>}
     </>}

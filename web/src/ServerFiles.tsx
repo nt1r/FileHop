@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { ArrowClockwiseIcon, DownloadSimpleIcon, FileTextIcon } from '@phosphor-icons/react'
+import { Badge } from '@cloudflare/kumo/components/badge'
 import { Button } from '@cloudflare/kumo/components/button'
 import { LayerCard } from '@cloudflare/kumo/components/layer-card'
 import { Text } from '@cloudflare/kumo/components/text'
@@ -74,25 +76,43 @@ export default function ServerFiles({ files, exchange, onExpired }: { files: Ret
     if (alive.current && version === generation.current) setNotice(message)
   }
   return <section className="stream" aria-label="服务器文件">
-    <LayerCard className="panel">
+    <LayerCard className="panel server-files-panel">
       <div className="panel-heading">
-        <div><Text variant="heading3" as="h2">服务器文件</Text><Text variant="secondary" size="sm">按成功上传顺序展示；仅管理经 FileHop 提交的文件。</Text></div>
-        <Button variant="secondary" disabled={busy} onClick={() => { void load(); setUsageRefresh(value => value + 1) }}>刷新文件列表</Button>
+        <div>
+          <Text variant="heading3" as="h2">服务器文件</Text>
+          <Text variant="secondary" size="sm">按成功上传顺序展示；仅管理经 FileHop 提交的文件。</Text>
+        </div>
+        <Button variant="secondary" icon={<ArrowClockwiseIcon />} disabled={busy} onClick={() => { void load(); setUsageRefresh(value => value + 1) }}>刷新文件列表</Button>
       </div>
       <StorageUsage refresh={usageRefresh} onExpired={onExpired} />
       {notice && <Text role="status" variant="error">{notice}</Text>}
       {exchange.fileStatusNotice && <Text role="status" variant="error">{exchange.fileStatusNotice}</Text>}
       {busy && <Text role="status">正在读取文件列表…</Text>}
       {!busy && !notice && items.length === 0 && <Text variant="secondary">暂无服务器文件。</Text>}
-      {items.map(exchange.projectFile).filter(file => file.file_state !== 'deleted').map(file => <LayerCard key={file.file_id} className="message" render={<article />}>
-        <Text variant="heading" as="h3">{file.file_name}</Text>
-        <Text>{file.file_size.toLocaleString('zh-CN')} 字节 · {file.source_label}</Text>
-        <Text as="time" {...{ dateTime: file.created_at }}>上传时间：{file.created_at}</Text>
-        <Text>{fileStateLabels[file.file_state]}</Text>
-        {file.file_state === 'available' && !deletion.blocksDownload(file.file_id) && <a href={`/api/files/${encodeURIComponent(file.file_id)}`} download onClick={event => { event.preventDefault(); void download(file.file_id) }}>下载附件</a>}
-        <DeleteFile file={file} deletion={deletion} />
+      {items.map(exchange.projectFile).filter(file => file.file_state !== 'deleted').map(file => <LayerCard key={file.file_id} className="message server-file-item" render={<article />}>
+        <div className="server-file-card-content">
+          <div className="server-file-icon-box">
+            <FileTextIcon size={26} weight="duotone" className="text-brand" />
+          </div>
+          <div className="server-file-info">
+            <Text variant="heading" as="h3">{file.file_name}</Text>
+            <div className="server-file-meta-row">
+              <Text>{file.file_size.toLocaleString('zh-CN')} 字节 · {file.source_label}</Text>
+              <Text as="time" {...{ dateTime: file.created_at }}>上传时间：{file.created_at}</Text>
+            </div>
+            <div className="server-file-state-row">
+              <Badge variant={file.file_state === 'available' ? 'success' : file.file_state === 'storage_error' ? 'error' : 'warning'}>
+                {fileStateLabels[file.file_state]}
+              </Badge>
+            </div>
+          </div>
+          <div className="server-file-actions-row">
+            {file.file_state === 'available' && !deletion.blocksDownload(file.file_id) && <a href={`/api/files/${encodeURIComponent(file.file_id)}`} download className="server-file-download-btn" onClick={event => { event.preventDefault(); void download(file.file_id) }}><DownloadSimpleIcon size={15} /><span>下载附件</span></a>}
+            <DeleteFile file={file} deletion={deletion} />
+          </div>
+        </div>
       </LayerCard>)}
-      {hasMore && <Button variant="secondary" disabled={busy} onClick={() => void load(true)}>加载更多文件</Button>}
+      {hasMore && <div className="load-more-row"><Button variant="secondary" disabled={busy} onClick={() => void load(true)}>加载更多文件</Button></div>}
     </LayerCard>
   </section>
 }
