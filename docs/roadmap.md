@@ -32,10 +32,10 @@ PR #87 已合入独立迁移、实例互斥和内部就绪检查；复用现有�
 
 ## 之后：自己的 Android 手机
 
-- [Spec 005](specs/005-android-text-loop.md)：先做登录、文本交换和复制，实际手机验证即可。
+- [Spec 005](specs/005-android-text-loop.md) / [#99](https://github.com/nt1r/FileHop/issues/99)：范围已确认，先做登录、文本交换和复制，实际手机验证即可；罕见异常遇到再处理。
 - [Spec 006](specs/006-android-files.md)：再做串行上传/下载，系统选择文件和保存位置。不做应用内本地下载管理；服务器清理先用 Web。
 
-这两份是范围概要，不提前拆远期实施票、锁死内部状态机或建设全部测试。实际开工时确定手机系统与工具链，SDK/最低版本不凭空承诺。
+Spec 005 已按确认范围拆为 [#100](https://github.com/nt1r/FileHop/issues/100) 登录与读取、[#101](https://github.com/nt1r/FileHop/issues/101) 双向文本与历史、[#102](https://github.com/nt1r/FileHop/issues/102) 签名 APK 与更新；#100 等待 Web 正式自用，#101/#102 均依赖 #100。Spec 006 保持概要，不提前拆票。不锁死内部状态机或建设全部测试。实际开工时确定手机系统与工具链，SDK/最低版本不凭空承诺。
 
 ## 完成标准
 
