@@ -19,6 +19,13 @@ test('extracted production page exchanges text and files over isolated HTTPS', a
     expect(src).toMatch(/^\/assets\/.+\.js$/)
     expect((await page.request.get(origin + src)).status()).toBe(200)
   }
+  for (const path of ['/login', '/files']) {
+    const deepLink = await page.request.get(`${origin}${path}`)
+    expect(deepLink.status()).toBe(200)
+    expect(deepLink.headers()['content-type']).toContain('text/html')
+    expect(await deepLink.text()).toContain('id="root"')
+  }
+  expect((await page.request.get(`${origin}/unknown-page`)).status()).toBe(404)
   expect((await page.request.get(`${origin}/assets/missing.js`)).status()).toBe(404)
   expect((await page.request.get(`${origin}/internal/live`)).status()).toBe(404)
   if (!verify) {

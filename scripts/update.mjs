@@ -105,8 +105,16 @@ try {
   }
   const status = JSON.parse(output('curl', ['--fail', '--silent', '--show-error', '--max-time', '10', `${c.origin}/api/status`]))
   if (status.state !== 'initialized') throw Error('HTTPS API smoke failed')
-  const html = output('curl', ['--fail', '--silent', '--show-error', '--max-time', '10', c.origin])
-  if (html !== readFileSync(resolve(target, 'index.html'), 'utf8').trim()) throw Error('HTTPS static version mismatch')
+  const expectedHtml = readFileSync(resolve(target, 'index.html'), 'utf8').trim()
+  for (const page of ['/', '/login', '/files']) {
+    let html
+    try {
+      html = output('curl', ['--fail', '--silent', '--show-error', '--max-time', '10', `${c.origin}${page}`])
+    } catch {
+      throw Error(`HTTPS page smoke failed: ${page}; verify the installed Caddy page routes`)
+    }
+    if (html !== expectedHtml) throw Error(`HTTPS static version mismatch: ${page}; verify the installed Caddy page routes`)
+  }
   writeFileSync(resolve(state, 'current-release.json.tmp'), JSON.stringify(manifest, null, 2), { mode: 0o600 })
   renameSync(resolve(state, 'current-release.json.tmp'), resolve(state, 'current-release.json'))
   const completed = `Updated to ${version} (${manifest.sha}). Refresh Web and verify your daily exchange path.`

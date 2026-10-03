@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { ArrowClockwiseIcon, ChatsIcon, ClockCountdownIcon, FolderIcon, InfoIcon, ShieldCheckIcon, SignInIcon, SignOutIcon, WarningCircleIcon } from '@phosphor-icons/react'
-import { Button } from '@cloudflare/kumo/components/button'
+import { Button, buttonVariants } from '@cloudflare/kumo/components/button'
+import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { Input } from '@cloudflare/kumo/components/input'
 import { LayerCard } from '@cloudflare/kumo/components/layer-card'
 import { Text } from '@cloudflare/kumo/components/text'
@@ -54,7 +55,11 @@ async function request(method: 'GET' | 'POST' | 'DELETE', credentials?: { userna
 }
 
 export default function SessionPage({ onAuthenticatedChange }: { onAuthenticatedChange?: (authed: boolean) => void } = {}) {
-  const [page, setPage] = useState<'messages' | 'files'>('messages')
+  const location = useLocation()
+  const navigate = useNavigate()
+  const knownPath = ['/', '/login', '/files'].includes(location.pathname)
+  const next = new URLSearchParams(location.search).get('next')
+  const destination = next === '/files' ? '/files' : '/'
   const [phase, setPhase] = useState<Phase>('checking')
   const [message, setMessage] = useState('正在恢复登录…')
   const [username, setUsername] = useState('')
@@ -85,7 +90,7 @@ export default function SessionPage({ onAuthenticatedChange }: { onAuthenticated
   function clearForLogout(notice: LogoutNotice) {
     // 通知只存在于当前打开的页面，不写持久化锁。先废弃所有在途回调，
     // 再清空页面；即使 Cookie 仍有效，也不能通过前台恢复或迟到响应重现内容。
-    setPage('messages')
+    navigate('/login', { replace: true })
     exchange.suspend(true)
     files.suspend(true)
     generation.current++
@@ -230,6 +235,20 @@ export default function SessionPage({ onAuthenticatedChange }: { onAuthenticated
   const statusVariant = isWarning ? 'warning' : isError ? 'error' : 'info'
   const statusTextVariant = isError ? 'error' : 'secondary'
 
+  if (!knownPath) return <LayerCard className="auth-card status-card">
+    <Text variant="heading" as="h2">页面不存在</Text>
+    <Link to="/">返回消息工作区</Link>
+  </LayerCard>
+
+  // 路由只切换展示；会话和发送 hooks 始终保留在公共层。
+  if ((phase === 'login' || phase === 'logout-pending') && location.pathname !== '/login') {
+    const target = logoutPending.current ? '/login' : `/login?next=${encodeURIComponent(location.pathname)}`
+    return <Navigate to={target} replace />
+  }
+  if (phase === 'authenticated' && location.pathname === '/login') {
+    return <Navigate to={destination} replace />
+  }
+
   return <>
     {phase === 'login' && <LayerCard className="auth-card login-card">
       <div className="auth-card-header">
@@ -319,27 +338,20 @@ export default function SessionPage({ onAuthenticatedChange }: { onAuthenticated
         </div>
       </div>
       <nav className="workspace-tab-nav" aria-label="工作区导航">
-        <Button
-          variant={page === 'messages' ? 'primary' : 'secondary'}
-          size="sm"
-          icon={<ChatsIcon size={16} weight={page === 'messages' ? 'fill' : 'regular'} />}
-          aria-pressed={page === 'messages'}
-          onClick={() => setPage('messages')}
-        >
+        <NavLink to="/" end className={({ isActive }) => buttonVariants({ variant: isActive ? 'primary' : 'secondary', size: 'sm' })}>
+          <ChatsIcon size={16} />
           消息工作区
-        </Button>
-        <Button
-          variant={page === 'files' ? 'primary' : 'secondary'}
-          size="sm"
-          icon={<FolderIcon size={16} weight={page === 'files' ? 'fill' : 'regular'} />}
-          aria-pressed={page === 'files'}
-          onClick={() => setPage('files')}
-        >
+        </NavLink>
+        <NavLink to="/files" className={({ isActive }) => buttonVariants({ variant: isActive ? 'primary' : 'secondary', size: 'sm' })}>
+          <FolderIcon size={16} />
           服务器文件
-        </Button>
+        </NavLink>
       </nav>
       {/* 草稿、发送与上传调度由会话层持有，切换视图不改变认证或任务生命周期。 */}
-      {page === 'messages' ? <Messages exchange={exchange} files={files} /> : <ServerFiles files={files} exchange={exchange} onExpired={expire} />}
+      <Routes>
+        <Route path="/" element={<Messages exchange={exchange} files={files} />} />
+        <Route path="/files" element={<ServerFiles files={files} exchange={exchange} onExpired={expire} />} />
+      </Routes>
     </section>}
   </>
 }

@@ -24,8 +24,8 @@ test.beforeEach(async ({ page }) => {
 })
 
 const row = (page: Page, name: string) => page.getByRole('article').filter({ hasText: name })
-const filesPage = (page: Page) => page.getByRole('button', { name: '服务器文件', exact: true }).click()
-const messagesPage = (page: Page) => page.getByRole('button', { name: '消息工作区', exact: true }).click()
+const filesPage = (page: Page) => page.getByRole('link', { name: '服务器文件', exact: true }).click()
+const messagesPage = (page: Page) => page.getByRole('link', { name: '消息工作区', exact: true }).click()
 async function remove(page: Page, name: string) {
   const id = (await row(page, name).getByRole('link').getAttribute('href'))!.split('/').at(-1)!
   page.once('dialog', dialog => dialog.accept())
