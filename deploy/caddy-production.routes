@@ -15,6 +15,9 @@ route {
 	}
 	handle {
 		root * {$FILEHOP_PROD_WEB_ROOT}
+		# 仅已知页面回退到 SPA；未知路径和丢失资源仍返回 404。
+		@spa_routes path / /login /files
+		rewrite @spa_routes /index.html
 		# index 和不存在的资源不长期缓存；丢失的脚本返回 404，不能返回 HTML 冒充 JS。
 		header Cache-Control no-cache
 		file_server

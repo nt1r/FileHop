@@ -39,6 +39,8 @@ if (tool === 'gh') {
  else fs.writeFileSync(path.join(args[args.indexOf('--dir')+1],'release.json'),JSON.stringify(m));
 } else if (tool === 'curl') {
  const url=args.at(-1);
+ if (url === c.origin + process.env.FAIL_PAGE) { console.error('Synthetic HTTP 404'); process.exit(22); }
+ if (url === c.origin + process.env.WRONG_PAGE) { console.log('<html>wrong version</html>'); process.exit(0); }
  console.log(url.endsWith('/internal/ready') ? JSON.stringify({database_available:true,uploads_ready:true}) : url.endsWith('/api/status') ? JSON.stringify({state:'initialized'}) : '<html>synthetic</html>');
 } else if (args[0] === 'image') console.log(JSON.stringify([{Os:'linux',Architecture:process.env.BAD_ARCH ? 'amd64' : 'arm64',Config:{Labels:{'org.opencontainers.image.revision':m.sha,'org.opencontainers.image.version':m.version}}}]));
 else if (args[0] === 'create') console.log('extract-id');
@@ -87,6 +89,20 @@ else if (args.includes('migrate')) {
   assert.equal(readFileSync(join(config.databaseDir, 'sentinel'), 'utf8'), 'preserve synthetic data')
   assert.ok(!existsSync(join(root, 'current-release.json')))
   assert.notEqual(update({}).status, 0, 'Must refuse blindly rerunning a failed target')
+  // 子路径未部署或返回错误版本时，不得记录更新成功；不自动改入口或回滚。
+  for (const [index, failure] of [{ FAIL_PAGE: '/login' }, { FAIL_PAGE: '/files' }, { WRONG_PAGE: '/files' }].entries()) {
+    config.webRoot = join(root, `web-route-failure-${index}`); mkdirSync(config.webRoot)
+    writeFileSync(path, JSON.stringify(config))
+    writeFileSync(activeCompose, previousCompose)
+    const failed = update(failure)
+    assert.notEqual(failed.status, 0)
+    assert.match(failed.stderr, /verify the installed Caddy page routes/)
+    assert.ok(failed.stderr.includes(failure.FAIL_PAGE ?? failure.WRONG_PAGE))
+    assert.ok(!existsSync(join(root, 'current-release.json')), 'Failed page smoke must not record a completed release')
+    assert.equal(readFileSync(join(config.databaseDir, 'sentinel'), 'utf8'), 'preserve synthetic data')
+  }
+  writeFileSync(activeCompose, previousCompose)
+  writeFileSync(log, '')
   // 新的隔离静态目录代表操作者调查后明确开始的新一次更新，不由脚本自动清理失败现场。
   config.webRoot = join(root, 'web-success'); mkdirSync(config.webRoot)
   writeFileSync(path, JSON.stringify(config))
@@ -94,5 +110,9 @@ else if (args.includes('migrate')) {
   assert.equal(success.status, 0, success.stderr)
   assert.equal(JSON.parse(readFileSync(join(root, 'current-release.json'))).version, 'v1.2.3')
   assert.equal(JSON.parse(readFileSync(activeCompose)).services.backend.image, manifest.backend)
-  console.log('Update migration failure preserves data and blocks startup; successful smoke records version.')
+  const successCalls = readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse)
+  for (const page of ['/', '/login', '/files']) {
+    assert.ok(successCalls.some(args => args[0] === 'curl' && args.at(-1) === config.origin + page), `Missing page smoke: ${page}`)
+  }
+  console.log('Update failures preserve data; all three page routes must match before recording success.')
 } finally { rmSync(root, { recursive: true }) }
