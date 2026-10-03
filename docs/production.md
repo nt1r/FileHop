@@ -33,6 +33,8 @@ Release 附件：
 
 首次提取目标静态镜像 `/web` 到 `web/<version>`，通过 `web/current` 链接提供完整静态目录；让 Caddy 的 `FILEHOP_PROD_WEB_ROOT` 始终指向这个链接。首次后端用 `deploy/compose.production.yml` 和明确 env-file 初始化、启动，另加固定 `ipv4_address` overlay，并保持与 JSON 中的项目、网络、挂载、Origin、代理地址相同。先通过真实 HTTPS 日常路径再开始使用更新工具；更新入口不会替已有/损坏实例重新初始化。
 
+Caddy 须加载 `deploy/caddy-production.routes` 中对 `/`、`/login`、`/files` 的页面回退规则。已有入口首次接入这些路由时，须另行授权更新并重载实际入口配置；更新脚本不会安装或修改共享 Caddy，仅更新前端制品不能让旧入口支持子路径。
+
 ## 更新
 
 先保存文字草稿、结束上传下载，告知所有设备暂停操作。刷新会丢失内存队列；断连或 5xx 不证明发送未保存。随后：
@@ -46,7 +48,7 @@ FILEHOP_CONFIRM_STOP=yes node scripts/update.mjs update /srv/filehop-production/
 
 每次执行将输出保留到配置目录中权限 0600 的 `update-<时间>-<进程>.log`（含迁移输出）；锁冲突也返回非零，不执行下载或停服。日志可能含本机路径，仅保留本地，不公开原始日志。
 
-更新生成 `<配置目录>/target.compose.json`，不继承 shell `COMPOSE_*`、工作目录 `.env` 或开发挂载。以后对该生产栈的查询/启停使用这个文件，不再使用残留的旧镜像配置。内部就绪最多等待 60 秒，并检查 HTTPS `/api/status` 及首页内容与目标 index 一致；之后才原子记录 `current-release.json`。脚本不保存凭证或做认证业务写入，操作者仍须刷新页面并走一次登录、文本、上传下载/删除的日常路径。迁移成功前，目标配置保存在配置目录的 `pending-<版本>-<进程>.compose.json`，不会覆盖日常使用的 `target.compose.json`；成功后才原子替换运行配置。失败保留 pending 文件供排障，不直接用它启动服务。
+更新生成 `<配置目录>/target.compose.json`，不继承 shell `COMPOSE_*`、工作目录 `.env` 或开发挂载。以后对该生产栈的查询/启停使用这个文件，不再使用残留的旧镜像配置。内部就绪最多等待 60 秒，并检查 HTTPS `/api/status` 以及 `/`、`/login`、`/files` 的内容均与目标 index 一致；任一路径请求失败或返回错误内容都判定冒烟失败，并提示核查已安装的 Caddy 页面路由；之后才原子记录 `current-release.json`。脚本不保存凭证或做认证业务写入，操作者仍须刷新页面并走一次登录、文本、上传下载/删除的日常路径。迁移成功前，目标配置保存在配置目录的 `pending-<版本>-<进程>.compose.json`，不会覆盖日常使用的 `target.compose.json`；成功后才原子替换运行配置。失败保留 pending 文件供排障，不直接用它启动服务。
 
 前端完整提取后才切换，不暴露半套资源。已有目标版本目录拒绝覆盖（包括失败残留），更新并不是可恢复状态机。不得手动删除目录后无脑重跑；先调查实际镜像、结构、资源和运行状态，再明确下一步。
 

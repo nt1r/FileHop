@@ -32,13 +32,14 @@ const server = createServer(async (request, response) => {
       if (upstream.body && request.method !== 'HEAD') Readable.fromWeb(upstream.body).pipe(response)
       else response.end()
     } else {
-      const path = resolve(root, '.' + (request.url === '/' ? '/index.html' : new URL(request.url, 'http://localhost').pathname))
+      const pathname = new URL(request.url, 'http://localhost').pathname
+      const path = resolve(root, '.' + (['/', '/login', '/files'].includes(pathname) ? '/index.html' : pathname))
       if (!path.startsWith(root + sep)) { response.writeHead(403); response.end(); return }
       const body = await readFile(path)
       response.setHeader('content-type', { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' }[extname(path)] || 'application/octet-stream')
       response.end(body)
     }
-  } catch { response.writeHead(502); response.end() }
+  } catch (error) { response.writeHead(error.code === 'ENOENT' ? 404 : 502); response.end() }
 })
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
 const child = spawn('pnpm', ['-C', 'web', 'run', 'test:e2e', process.env.TEST_SPEC], {
