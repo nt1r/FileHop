@@ -136,7 +136,7 @@ FILEHOP_PROD_WEB_IMAGE=filehop-isolated-static bash tests/production_smoke.sh
 
 需 Docker、Compose、Cargo、Node/pnpm、已安装的 Playwright Chromium、Caddy、OpenSSL 和 GNU 工具。使用本次专属镜像标签，勿覆盖既有部署镜像。CI 仅在 GitHub 托管 runner 构建和验证，不发布镜像、不连接 VPS。静态制品为 scratch 镜像，只有 `/web` 构建产物，没有 Node 或可运行服务；用 `docker create <image> /unused` 建立停止的提取容器，再 `docker cp <container>:/web/. <new-directory>`，最后移除该提取容器。镜像没有默认命令是有意设计，不用 `docker run` 提取。
 
-冒烟使用唯一 Compose 项目及两个专用 internal 网络、真实默认 UID/GID 10001、权限 0700 的一次性挂载；通过目标镜像 PTY 隐藏输入初始化。生产与开发测试栈使用不同账户和存储身份。入口仅绑定回环随机 HTTPS 端口，Caddy 使用本次生成的证书；Node 显式信任该证书，Chromium 仅豁免该证书公钥，不设置全局忽略 TLS 错误。该信任方式只服务隔离测试，不是公网证书方案。
+冒烟使用唯一 Compose 项目及两个专用 internal 网络、真实默认 UID/GID 10001、权限 0700 的一次性挂载；通过目标镜像 PTY 隐藏输入初始化。生产与开发测试栈使用不同账户和存储身份。入口仅绑定回环随机 HTTPS 端口，Caddy 使用本次生成的证书；Node 显式信任该证书，Chromium 仅豁免该证书公钥，不设置全局忽略 TLS 错误。该信任方式只服务隔离测试，不是公网证书方案。此容器重建冒烟的 Chromium 固定使用 HTTP/1.1：宿主虚拟接口变化会触发 Chromium 关闭 HTTP/2 会话，使无关的回环请求报 `ERR_NETWORK_CHANGED`。不重试业务操作、不关闭证书校验；生产 Caddy 仍支持 HTTP/2，此冒烟不作为 HTTP/2 的实际使用证据。
 
 测试覆盖：静态资源实际提取和加载、缺失资源 404、生产无开发 Basic Auth、开发仍受保护、未认证拒绝、浏览器文本及附件往返、开发不能使用生产账户/Cookie、开发历史为空、后端及入口进程重建后原会话和消息/附件保留、缺失/空/错配挂载拒绝、默认运行身份及目录权限、无后端端口发布、实际日志驱动及轮转参数。入口为独立宿主进程且静态根目录与业务数据分离，不配置数据库或附件文件服务路径。测试不重复全部业务边界，不证明公网 ACME、真实到期续签、正式 Chrome 或实际生产部署通过。
 
