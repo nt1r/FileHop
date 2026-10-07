@@ -1,0 +1,15 @@
+# Site fragment only: review and integrate into the existing shared Caddy.
+# Variables must be configured in Caddy's environment, not just app Compose.
+# Do NOT commit the real Basic Auth hash or credentials.
+https://{$FILEHOP_DEV_HOST} {
+	tls {
+		issuer acme {
+			disable_http_challenge
+		}
+	}
+
+	# Set FILEHOP_BACKEND_UPSTREAM=filehop-dev-backend:8080 and
+	# FILEHOP_WEB_UPSTREAM=filehop-dev-web:5173 for container ingress.
+	# Install caddy-dev.routes beside this file; host ingress uses fixed private IPs.
+	import caddy-dev.routes
+}

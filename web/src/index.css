@@ -1,0 +1,812 @@
+@import '@cloudflare/kumo/styles/standalone';
+
+:root {
+  color-scheme: light;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--color-kumo-default, #18181b);
+  background:
+    radial-gradient(ellipse at 50% -8%, color-mix(in srgb, var(--color-kumo-brand) 16%, transparent), transparent 38rem),
+    linear-gradient(180deg, var(--color-kumo-canvas) 0%, color-mix(in srgb, var(--color-kumo-elevated) 65%, var(--color-kumo-canvas)) 100%);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root { isolation: isolate; }
+
+/* Default shell */
+.app-shell {
+  box-sizing: border-box;
+  min-height: 100vh;
+}
+
+/* ==========================================================================
+   Authentication layout (Centered hero presentation)
+   ========================================================================== */
+.app-shell.auth-mode {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 100%;
+  padding: 3rem 1.25rem;
+}
+
+.auth-container {
+  width: 100%;
+  max-width: 440px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+  animation: authFadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes authFadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.auth-brand-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.5rem;
+}
+
+.brand-logo-emblem {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #f6821f 0%, #fa8c16 55%, #e65a00 100%);
+  color: #ffffff;
+  box-shadow:
+    0 4px 14px 0 color-mix(in srgb, var(--color-kumo-brand) 38%, transparent),
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  margin-bottom: 0.25rem;
+}
+
+.auth-brand-title {
+  font-size: 1.85rem;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  margin: 0;
+  color: var(--color-kumo-contrast, #09090b);
+}
+
+.auth-brand-subtitle {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--text-color-kumo-subtle, #71717a);
+}
+
+.auth-card {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 2rem;
+  border-radius: 1.25rem;
+  border: 1px solid color-mix(in srgb, var(--color-kumo-contrast) 8%, transparent);
+  background: var(--color-kumo-base, #ffffff);
+  box-shadow:
+    0 1px 2px 0 rgba(0, 0, 0, 0.04),
+    0 10px 28px -4px rgba(0, 0, 0, 0.06),
+    0 20px 48px -12px color-mix(in srgb, var(--color-kumo-brand) 8%, transparent);
+  display: grid;
+  gap: 1.25rem;
+}
+
+.auth-card-header {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.auth-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.auth-status-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.75rem 0.95rem;
+  border-radius: 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  border: 1px solid transparent;
+}
+
+.auth-status-callout.error {
+  background: color-mix(in srgb, var(--text-color-kumo-danger, #ef4444) 7%, var(--color-kumo-base, #ffffff));
+  border-color: color-mix(in srgb, var(--text-color-kumo-danger, #ef4444) 24%, transparent);
+  color: var(--text-color-kumo-danger, #b91c1c);
+}
+
+.auth-status-callout.warning {
+  background: color-mix(in srgb, #f59e0b 8%, var(--color-kumo-base, #ffffff));
+  border-color: color-mix(in srgb, #f59e0b 28%, transparent);
+  color: #b45309;
+}
+
+.auth-status-callout.info {
+  background: color-mix(in srgb, var(--color-kumo-brand) 7%, var(--color-kumo-base, #ffffff));
+  border-color: color-mix(in srgb, var(--color-kumo-brand) 24%, transparent);
+  color: var(--color-kumo-default, #27272a);
+}
+
+.auth-status-callout [role="status"] {
+  margin: 0;
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+}
+
+.status-callout-icon {
+  flex-shrink: 0;
+  margin-top: 0.12rem;
+}
+
+.login-form {
+  display: grid;
+  gap: 1.15rem;
+}
+
+.form-field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.login-submit-btn {
+  width: 100%;
+  justify-content: center;
+  height: 2.75rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  border-radius: 0.75rem;
+  box-shadow: 0 2px 8px 0 color-mix(in srgb, var(--color-kumo-brand) 30%, transparent);
+  transition: transform 0.1s ease, box-shadow 0.15s ease;
+}
+
+.login-submit-btn:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px 0 color-mix(in srgb, var(--color-kumo-brand) 40%, transparent);
+}
+
+.login-submit-btn:not(:disabled):active {
+  transform: translateY(0);
+}
+
+.auth-card-footer {
+  padding-top: 0.65rem;
+  border-top: 1px solid color-mix(in srgb, var(--color-kumo-contrast) 6%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.auth-feature-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.775rem;
+  color: var(--text-color-kumo-subtle, #71717a);
+}
+
+.auth-footer {
+  text-align: center;
+  padding-top: 0.25rem;
+}
+
+.auth-footer p {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-color-kumo-subtle, #71717a);
+}
+
+.auth-guide-text {
+  line-height: 1.5;
+}
+
+/* ==========================================================================
+   Workspace layout (Full desktop workspace)
+   ========================================================================== */
+.app-shell.workspace-mode {
+  box-sizing: border-box;
+  width: min(1080px, calc(100% - 3rem));
+  margin: 0 auto;
+  padding: 2rem 0 3rem;
+}
+
+.workspace-stage {
+  display: grid;
+  gap: 1.5rem;
+  margin-top: 1.25rem;
+}
+
+.brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.brand-mark {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.brand-icon-mini {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #f6821f 0%, #fa8c16 100%);
+  color: #ffffff;
+  box-shadow: 0 2px 6px 0 color-mix(in srgb, var(--color-kumo-brand) 30%, transparent);
+}
+
+.text-brand { color: var(--color-kumo-brand, #f6821f); }
+.text-danger { color: var(--text-color-kumo-danger, #ef4444); }
+
+.masthead, .panel-heading, .composer-heading, .action-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+
+.workspace-header {
+  padding-bottom: 0.25rem;
+}
+
+.session-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.85rem;
+  border-radius: 9999px;
+  background: color-mix(in srgb, #10b981 8%, var(--color-kumo-base));
+  border: 1px solid color-mix(in srgb, #10b981 22%, transparent);
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-dot.online {
+  background: #10b981;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+}
+
+.workspace-tab-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem;
+  border-radius: 0.85rem;
+  background: color-mix(in srgb, var(--color-kumo-elevated) 80%, var(--color-kumo-canvas));
+  border: 1px solid color-mix(in srgb, var(--color-kumo-contrast) 6%, transparent);
+  margin-bottom: 0.25rem;
+}
+
+.action-row.centered {
+  justify-content: center;
+  width: 100%;
+}
+
+.action-row.centered button {
+  width: 100%;
+  justify-content: center;
+}
+
+.workspace { display: grid; gap: 1.25rem; }
+
+.panel {
+  padding: 1.5rem;
+  border-radius: 1.15rem;
+  border: 1px solid color-mix(in srgb, var(--color-kumo-contrast) 7%, transparent);
+  background: var(--color-kumo-base, #ffffff);
+  box-shadow:
+    0 1px 3px 0 rgba(0, 0, 0, 0.03),
+    0 6px 16px -4px rgba(0, 0, 0, 0.04);
+}
+
+.status-panel, .composer { display: grid; gap: 1.15rem; }
+
+/* ==========================================================================
+   Messages Stream Page
+   ========================================================================== */
+.stream { display: grid; gap: 1.25rem; }
+.stream-toolbar { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+
+/* 独立阅读区域让分页入口与输入保持可用；禁用浏览器自动锚定，避免与显式位置补偿叠加。 */
+.messages {
+  display: grid;
+  align-content: start;
+  gap: 0.85rem;
+  max-height: min(52vh, 38rem);
+  padding-right: 0.4rem;
+  overflow-y: auto;
+  overflow-anchor: none;
+  position: relative;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-kumo-contrast) 20%, transparent) transparent;
+}
+
+.messages::-webkit-scrollbar {
+  width: 6px;
+}
+
+.messages::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-kumo-contrast) 20%, transparent);
+  border-radius: 9999px;
+}
+
+.message.message-item-card {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1.15rem 1.25rem;
+  border-radius: 0.95rem;
+  border: 1px solid color-mix(in srgb, var(--color-kumo-contrast) 6%, transparent);
+  background: color-mix(in srgb, var(--color-kumo-elevated) 45%, var(--color-kumo-base));
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.message.message-item-card:hover {
+  border-color: color-mix(in srgb, var(--color-kumo-brand) 25%, transparent);
+  box-shadow: 0 2px 8px -2px rgba(0, 0, 0, 0.04);
+}
+
+.message header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.message-source-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 0.45rem;
+  background: color-mix(in srgb, var(--color-kumo-contrast) 5%, transparent);
+}
+
+.message-source-icon {
+  color: var(--text-color-kumo-subtle);
+}
+
+.message-source-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-kumo-contrast);
+}
+
+.message-body {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.message-text-content {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: var(--color-kumo-default);
+  background: color-mix(in srgb, var(--color-kumo-base) 80%, var(--color-kumo-canvas));
+  padding: 0.75rem 0.95rem;
+  border-radius: 0.65rem;
+  border: 1px solid color-mix(in srgb, var(--color-kumo-contrast) 5%, transparent);
+}
+
+.message-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.file-message-card {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--color-kumo-brand) 4%, var(--color-kumo-base));
+  border: 1px solid color-mix(in srgb, var(--color-kumo-brand) 18%, transparent);
+}
+
+.file-message-icon-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-kumo-brand) 12%, transparent);
+  flex-shrink: 0;
+}
+
+.file-message-details {
+  display: grid;
+  gap: 0.35rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.file-message-meta {
+  font-weight: 600;
+  font-size: 0.925rem;
+  color: var(--color-kumo-contrast);
+  word-break: break-all;
+}
+
+.file-message-status-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.file-download-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.825rem;
+  font-weight: 500;
+  color: var(--color-kumo-brand, #f6821f);
+  text-decoration: none;
+  padding: 0.25rem 0.65rem;
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--color-kumo-brand) 10%, transparent);
+  transition: background 0.15s ease;
+}
+
+.file-download-link:hover {
+  background: color-mix(in srgb, var(--color-kumo-brand) 18%, transparent);
+}
+
+.message-notice { min-height: 1.7em; }
+
+/* ==========================================================================
+   File Exchange Panel
+   ========================================================================== */
+.upload-panel { display: grid; gap: 1rem; }
+.file-picker { display: none; }
+
+.upload-tip-box {
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--color-kumo-contrast) 3%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-kumo-contrast) 6%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.upload-paused-banner {
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, #f59e0b 8%, transparent);
+  border: 1px solid color-mix(in srgb, #f59e0b 25%, transparent);
+  color: #b45309;
+}
+
+.upload-batch-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 0.25rem;
+}
+
+.upload-task {
+  display: grid;
+  gap: 0.55rem;
+  padding: 1rem 1.15rem;
+  border: 1px solid color-mix(in srgb, var(--color-kumo-brand) 22%, transparent);
+  border-radius: 0.85rem;
+  background: color-mix(in srgb, var(--color-kumo-brand) 3%, var(--color-kumo-base));
+}
+
+.upload-task-info {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.upload-task-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--color-kumo-contrast);
+}
+
+.upload-task progress {
+  width: 100%;
+  height: 6px;
+  border-radius: 9999px;
+  overflow: hidden;
+  accent-color: var(--color-kumo-brand, #f6821f);
+}
+
+.upload-task-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.upload-task-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* ==========================================================================
+   Composer Section
+   ========================================================================== */
+.composer { margin-top: 0.25rem; }
+.composer-byte-meter {
+  font-size: 0.825rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 0.45rem;
+  background: color-mix(in srgb, var(--color-kumo-contrast) 5%, transparent);
+  color: var(--text-color-kumo-subtle);
+}
+
+.composer-input-row {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.composer textarea {
+  min-height: 8.5rem;
+  resize: vertical;
+  font-family: inherit;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.composer-footer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.composer-key-tip {
+  color: var(--text-color-kumo-subtle);
+}
+
+.recovery { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+
+/* ==========================================================================
+   Storage Usage Section
+   ========================================================================== */
+.storage-usage {
+  display: grid;
+  gap: 1rem;
+  padding: 1.25rem;
+  border-radius: 0.95rem;
+  background: color-mix(in srgb, var(--color-kumo-elevated) 45%, var(--color-kumo-base));
+  border: 1px solid color-mix(in srgb, var(--color-kumo-contrast) 6%, transparent);
+  margin: 0.5rem 0 1rem;
+}
+
+.storage-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.storage-title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.storage-percentage-badge {
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.2rem 0.65rem;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--color-kumo-brand) 12%, transparent);
+  color: var(--color-kumo-brand);
+  border: 1px solid color-mix(in srgb, var(--color-kumo-brand) 25%, transparent);
+}
+
+.storage-meter-track {
+  display: flex;
+  width: 100%;
+  height: 8px;
+  border-radius: 9999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--color-kumo-contrast) 8%, transparent);
+  gap: 2px;
+}
+
+.storage-meter-fill.saved {
+  background: var(--color-kumo-brand, #f6821f);
+  border-radius: 9999px 0 0 9999px;
+}
+
+.storage-meter-fill.reserved {
+  background: #f59e0b;
+}
+
+.storage-meter-fill.cleaning {
+  background: #8b5cf6;
+  border-radius: 0 9999px 9999px 0;
+}
+
+.storage-values {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+}
+
+.storage-stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 0.65rem;
+  background: var(--color-kumo-base, #ffffff);
+  border: 1px solid color-mix(in srgb, var(--color-kumo-contrast) 6%, transparent);
+}
+
+.storage-stat-card dt {
+  font-size: 0.775rem;
+  color: var(--text-color-kumo-subtle);
+}
+
+.storage-stat-card dd {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--color-kumo-contrast);
+  font-variant-numeric: tabular-nums;
+  word-break: break-all;
+}
+
+/* ==========================================================================
+   Server Files Section
+   ========================================================================== */
+.server-files-panel {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.server-file-item {
+  padding: 1.15rem 1.25rem;
+  border-radius: 0.95rem;
+  border: 1px solid color-mix(in srgb, var(--color-kumo-contrast) 6%, transparent);
+  background: color-mix(in srgb, var(--color-kumo-elevated) 45%, var(--color-kumo-base));
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.server-file-item:hover {
+  border-color: color-mix(in srgb, var(--color-kumo-brand) 25%, transparent);
+  box-shadow: 0 2px 8px -2px rgba(0, 0, 0, 0.04);
+}
+
+.server-file-card-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  width: 100%;
+}
+
+.server-file-icon-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-kumo-brand) 10%, transparent);
+  flex-shrink: 0;
+}
+
+.server-file-info {
+  display: grid;
+  gap: 0.35rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.server-file-info h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-kumo-contrast);
+  word-break: break-all;
+}
+
+.server-file-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+  font-size: 0.825rem;
+  color: var(--text-color-kumo-subtle);
+}
+
+.server-file-state-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.server-file-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.server-file-download-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--color-kumo-brand, #f6821f);
+  text-decoration: none;
+  padding: 0.4rem 0.8rem;
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, var(--color-kumo-brand) 10%, transparent);
+  transition: background 0.15s ease;
+}
+
+.server-file-download-btn:hover {
+  background: color-mix(in srgb, var(--color-kumo-brand) 18%, transparent);
+}
+
+.load-more-row {
+  display: flex;
+  justify-content: center;
+  padding-top: 0.5rem;
+}
+
+.delete-file-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.delete-notice {
+  font-size: 0.825rem;
+  color: var(--text-color-kumo-danger);
+}
+
+/* ==========================================================================
+   Responsive Adaptations
+   ========================================================================== */
+@media (max-width: 980px) {
+  .app-shell.workspace-mode { width: min(760px, calc(100% - 2rem)); }
+  .masthead, .panel-heading, .message header, .server-file-card-content { display: grid; }
+  .server-file-actions-row { align-self: flex-start; }
+}

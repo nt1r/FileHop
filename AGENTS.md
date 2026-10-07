@@ -10,6 +10,23 @@ FileHop is a lightweight, self-hosted text and file exchange tool for desktop We
 - For changes spanning authentication, file lifecycle, client behavior, or deployment, read the affected Specs and their cross-references. Read unrelated Specs only when needed.
 - Before creating or updating a PR description, read [.github/pull_request_template.md](.github/pull_request_template.md) and follow its structure.
 
+## Agent skills
+
+### Issue tracker
+
+Track tasks and bugs in GitHub Issues; repository Specs remain authoritative.
+Before issue operations, read [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md).
+
+### Triage labels
+
+Use the five canonical triage labels.
+Before classifying or labeling issues, read [docs/agents/triage-labels.md](docs/agents/triage-labels.md).
+
+### Domain docs
+
+Use the single-context layout: root CONTEXT.md and optional docs/adr/.
+Before domain exploration or decision changes, read [docs/agents/domain.md](docs/agents/domain.md).
+
 ## Sources of Truth
 
 - `CONTEXT.md` defines domain terms, not implementation details.
@@ -28,7 +45,7 @@ FileHop is a lightweight, self-hosted text and file exchange tool for desktop We
 3. Inspect existing build configuration and scripts before choosing commands or introducing tooling. If a command or capability is missing, report that rather than claiming it exists.
 4. Implement and verify one coherent behavior at a time. Keep later-stage features outside the current slice unless requested.
 5. Use the testing principles to cover risk at appropriate boundaries; avoid coupling tests to private implementation structure.
-6. Check the resulting diff and any documentation affected by the change.
+6. Check the resulting diff and affected documentation. Before adding reports or recording completion evidence, follow the [evidence placement rules](docs/testing.md#5-与-spec-的对应及完成判定).
 
 For reviews, report concrete findings with file references, consequences, and recommended fixes. Distinguish contract violations from optional improvements. A review request alone does not authorize edits or deployment.
 
@@ -42,6 +59,10 @@ The development machine is a VPS that may also host production. Treat repository
 - Permission to edit a deployment script or document is not permission to execute it against production.
 - Preserve existing remote-management access. Inspect environment configuration without printing secret values.
 - Report external actions separately from local edits; a documented plan must not be presented as an applied setting.
+
+## Public-Repository Privacy
+
+Inspection or deployment authorization is not publication consent. Before committing, pushing, publishing tracker text or artifacts, or handling an exposure, read and apply the [public content checklist](CONTRIBUTING.md#public-content-checklist), the authoritative privacy procedure.
 
 ## Completion Reporting
 

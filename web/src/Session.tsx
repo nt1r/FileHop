@@ -1,0 +1,357 @@
+import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { ArrowClockwiseIcon, ChatsIcon, ClockCountdownIcon, FolderIcon, InfoIcon, ShieldCheckIcon, SignInIcon, SignOutIcon, WarningCircleIcon } from '@phosphor-icons/react'
+import { Button, buttonVariants } from '@cloudflare/kumo/components/button'
+import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { Input } from '@cloudflare/kumo/components/input'
+import { LayerCard } from '@cloudflare/kumo/components/layer-card'
+import { Text } from '@cloudflare/kumo/components/text'
+import Messages from './Messages'
+import ServerFiles from './ServerFiles'
+import { useMessages } from './messages'
+import { useFiles } from './files'
+
+type Session = { expires_at: number; server_time: number }
+type Phase = 'checking' | 'login' | 'authenticated' | 'unknown' | 'logout-pending'
+type LogoutNotice = 'logout-pending' | 'logged-out'
+class ApplicationError extends Error {
+  code: string
+  retryAfter: number
+  constructor(code: string, message: string, retryAfter = 0) { super(message); this.code = code; this.retryAfter = retryAfter }
+}
+async function request(method: 'GET' | 'POST', credentials?: { username: string; password: string }): Promise<Session>
+async function request(method: 'DELETE'): Promise<void>
+async function request(method: 'GET' | 'POST' | 'DELETE', credentials?: { username: string; password: string }): Promise<Session | void> {
+  const response = await fetch('/api/session', {
+    method, credentials: 'same-origin', cache: 'no-store',
+    signal: AbortSignal.timeout(method === 'POST' ? 30_000 : 15_000),
+    ...(credentials ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(credentials) } : {}),
+  })
+  if (response.headers.has('x-filehop-access-layer') || !response.headers.get('content-type')?.includes('application/json')) {
+    throw new Error('访问层异常')
+  }
+  const value: unknown = await response.json()
+  if (!value || typeof value !== 'object') throw new Error('响应无效')
+  if (!response.ok) {
+    if (response.status === 429 && 'code' in value && value.code === 'login_limited') {
+      const seconds = Number(response.headers.get('retry-after'))
+      throw new ApplicationError('login_limited', '登录请求过多，请稍后重试', Number.isFinite(seconds) && seconds > 0 ? seconds : 60)
+    }
+    if ('code' in value && 'message' in value && typeof value.code === 'string' && typeof value.message === 'string') {
+      if (response.status === 401 && (value.code === 'session_invalid' || value.code === 'invalid_credentials')) {
+        throw new ApplicationError(value.code, value.message)
+      }
+    }
+    throw new Error('应用或访问层暂不可用，请稍后重试')
+  }
+  if (method === 'DELETE') {
+    if ('state' in value && value.state === 'logged_out') return
+    throw new Error('退出响应无效')
+  }
+  if (!('expires_at' in value) || !('server_time' in value) ||
+    typeof value.expires_at !== 'number' || typeof value.server_time !== 'number' ||
+    !Number.isSafeInteger(value.expires_at) || !Number.isSafeInteger(value.server_time) ||
+    value.expires_at <= value.server_time || value.expires_at - value.server_time > 43_200) throw new Error('响应无效')
+  return value as Session
+}
+
+export default function SessionPage({ onAuthenticatedChange }: { onAuthenticatedChange?: (authed: boolean) => void } = {}) {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const knownPath = ['/', '/login', '/files'].includes(location.pathname)
+  const next = new URLSearchParams(location.search).get('next')
+  const destination = next === '/files' ? '/files' : '/'
+  const [phase, setPhase] = useState<Phase>('checking')
+  const [message, setMessage] = useState('正在恢复登录…')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [retryAt, setRetryAt] = useState(0)
+  const [retryReady, setRetryReady] = useState(true)
+  const generation = useRef(0)
+  const logoutPending = useRef(false)
+  const channel = useRef<BroadcastChannel | null>(null)
+  const deadline = useRef<number | null>(null)
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const exchange = useMessages(phase === 'authenticated', expire)
+  const files = useFiles(phase === 'authenticated', expire, exchange.receivedFile, exchange.refreshFileStates)
+
+  useEffect(() => {
+    onAuthenticatedChange?.(phase === 'authenticated')
+  }, [phase, onAuthenticatedChange])
+
+  useEffect(() => {
+    const remaining = retryAt - Date.now()
+    setRetryReady(remaining <= 0)
+    if (remaining <= 0) return
+    const timer = setTimeout(() => setRetryReady(true), remaining)
+    return () => clearTimeout(timer)
+  }, [retryAt])
+
+  function clearForLogout(notice: LogoutNotice) {
+    // 通知只存在于当前打开的页面，不写持久化锁。先废弃所有在途回调，
+    // 再清空页面；即使 Cookie 仍有效，也不能通过前台恢复或迟到响应重现内容。
+    navigate('/login', { replace: true })
+    exchange.suspend(true)
+    files.suspend(true)
+    generation.current++
+    logoutPending.current = notice === 'logout-pending'
+    deadline.current = null
+    clearTimeout(timer.current)
+    setUsername('')
+    setPassword('')
+    setBusy(false)
+    setPhase(notice === 'logout-pending' ? 'logout-pending' : 'login')
+    setMessage(notice === 'logout-pending'
+      ? '退出未确认：当前页面已清空，服务器登录状态尚未确认撤销。可重试退出；刷新或新开页面仍可能恢复有效登录。'
+      : '已退出 FileHop 登录。此操作不会清除浏览器的外层 Basic Auth。')
+  }
+  async function logout() {
+    if ((exchange.hasUnsaved() || files.hasUnsaved()) && !window.confirm('有未保存正文或文件传输。退出将清空当前页面，原消息仍可能已保存。确认退出？')) return
+    clearForLogout('logout-pending')
+    channel.current?.postMessage('logout-pending')
+    const version = generation.current
+    setBusy(true)
+    try {
+      await request('DELETE')
+      if (version !== generation.current) return
+      clearForLogout('logged-out')
+      channel.current?.postMessage('logged-out')
+    } catch (error) {
+      if (version !== generation.current) return
+      if (error instanceof ApplicationError && error.code === 'session_invalid') {
+        clearForLogout('logged-out')
+        channel.current?.postMessage('logged-out')
+      }
+    } finally { if (version === generation.current) setBusy(false) }
+  }
+
+  function expire() {
+    // 先使在途读取失效，再隐藏受保护内容；旧响应不能把页面带回已登录状态。
+    exchange.suspend(false)
+    files.suspend(false)
+    generation.current++
+    deadline.current = null
+    clearTimeout(timer.current)
+    setPhase('login')
+    setMessage('登录已失效，请在当前页面重新登录。已中断本地上传，等待文件需重新选择；服务器仍可能保存已接收的文件，重登后请手动查询结果或结束本轮。')
+    setBusy(false)
+  }
+  function accept(value: Session, started: number) {
+    // 使用服务端剩余时间并扣除整个请求耗时，避免本机时钟偏差或迟到响应延长会话。
+    const remaining = (value.expires_at - value.server_time) * 1000 - (Date.now() - started)
+    if (remaining <= 0) { expire(); return }
+    deadline.current = Date.now() + remaining
+    clearTimeout(timer.current)
+    timer.current = setTimeout(expire, remaining)
+    setPhase('authenticated')
+    setMessage('登录成功。')
+    setPassword('')
+  }
+  async function check(initial = false) {
+    if (logoutPending.current) return
+    const version = ++generation.current
+    const started = Date.now()
+    setBusy(true)
+    try {
+      const session = await request('GET')
+      if (version === generation.current) accept(session, started)
+    } catch (error) {
+      if (version !== generation.current) return
+      if (error instanceof ApplicationError && error.code === 'session_invalid') {
+        expire()
+        if (initial) setMessage('已初始化，请登录。')
+        // 新开页面也可能先确认 Cookie 已失效；只让正在退出的页面收敛，
+        // 不把普通到期通知误当成主动丢弃草稿的指令。
+        channel.current?.postMessage('session-invalid')
+      } else {
+        // 网络及外层 401 不是应用注销；已验证页面保留，未知登录则只允许查询确认。
+        setPhase(current => current === 'authenticated' ? current : 'unknown')
+        setMessage('无法确认登录状态，请检查网络或访问层后重试检查。')
+      }
+    } finally { if (version === generation.current) setBusy(false) }
+  }
+  useEffect(() => {
+    const notices = new BroadcastChannel('filehop-session')
+    channel.current = notices
+    notices.onmessage = (event: MessageEvent<unknown>) => {
+      // 多个标签页同时重试时，重复待确认通知不能使彼此的退出成功回调失效。
+      if (event.data === 'logout-pending' && !logoutPending.current) clearForLogout('logout-pending')
+      else if (event.data === 'logged-out') clearForLogout('logged-out')
+      else if (event.data === 'session-invalid' && logoutPending.current) clearForLogout('logged-out')
+    }
+    void check(true)
+    const visible = () => {
+      if (document.visibilityState !== 'visible') return
+      if (deadline.current !== null && Date.now() >= deadline.current) expire()
+    }
+    document.addEventListener('visibilitychange', visible)
+    window.addEventListener('pageshow', visible)
+    const cleanup = () => { generation.current++; clearTimeout(timer.current) }
+    return () => {
+      cleanup()
+      files.reset()
+      notices.close()
+      channel.current = null
+      document.removeEventListener('visibilitychange', visible)
+      window.removeEventListener('pageshow', visible)
+    }
+    // 初始化只执行一次；后续恢复由明确的用户动作触发。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function login(event: FormEvent) {
+    event.preventDefault()
+    if (busy || phase !== 'login' || Date.now() < retryAt) return
+    const version = ++generation.current
+    const started = Date.now()
+    setBusy(true)
+    try {
+      const session = await request('POST', { username, password })
+      if (version === generation.current) accept(session, started)
+    } catch (error) {
+      if (version !== generation.current) return
+      if (error instanceof ApplicationError && error.code === 'login_limited') {
+        setRetryAt(Date.now() + error.retryAfter * 1000)
+        setMessage('登录请求过多，请等待后重试。')
+      } else if (error instanceof ApplicationError && error.code === 'invalid_credentials') {
+        setMessage('用户名或密码错误')
+      } else {
+        // POST 响应丢失可能已设置 Cookie。先查询，绝不自动重复创建登录。
+        setPhase('unknown')
+        setMessage('登录结果未确认，正在检查当前会话…')
+        setPassword('')
+        await check()
+      }
+    } finally {
+      if (version === generation.current) {
+        setPassword('')
+        setBusy(false)
+      }
+    }
+  }
+
+  const isError = message.includes('错误') || message.includes('过多') || message.includes('失效') || message.includes('未确认') || phase === 'unknown' || phase === 'logout-pending'
+  const isWarning = message.includes('过多')
+  const statusVariant = isWarning ? 'warning' : isError ? 'error' : 'info'
+  const statusTextVariant = isError ? 'error' : 'secondary'
+
+  if (!knownPath) return <LayerCard className="auth-card status-card">
+    <Text variant="heading" as="h2">页面不存在</Text>
+    <Link to="/">返回消息工作区</Link>
+  </LayerCard>
+
+  // 路由只切换展示；会话和发送 hooks 始终保留在公共层。
+  if ((phase === 'login' || phase === 'logout-pending') && location.pathname !== '/login') {
+    const target = logoutPending.current ? '/login' : `/login?next=${encodeURIComponent(location.pathname)}`
+    return <Navigate to={target} replace />
+  }
+  if (phase === 'authenticated' && location.pathname === '/login') {
+    return <Navigate to={destination} replace />
+  }
+
+  return <>
+    {phase === 'login' && <LayerCard className="auth-card login-card">
+      <div className="auth-card-header">
+        <Text variant="heading" as="h2">登录</Text>
+        <Text variant="secondary" size="sm">进入你的私人消息流</Text>
+      </div>
+      <div className={`auth-status-callout ${statusVariant}`}>
+        {isWarning ? (
+          <ClockCountdownIcon size={18} weight="fill" className="status-callout-icon" />
+        ) : isError ? (
+          <WarningCircleIcon size={18} weight="fill" className="status-callout-icon" />
+        ) : (
+          <InfoIcon size={18} weight="fill" className="status-callout-icon" />
+        )}
+        <Text role="status" variant={statusTextVariant}>{message}</Text>
+      </div>
+      <form className="login-form" onSubmit={login}>
+        <div className="form-field">
+          <Input
+            label="用户名"
+            size="lg"
+            autoComplete="username"
+            placeholder="输入管理员用户名"
+            value={username}
+            onChange={e => setUsername(e.target.value)}
+            required
+          />
+        </div>
+        <div className="form-field">
+          <Input
+            label="密码"
+            type="password"
+            size="lg"
+            autoComplete="current-password"
+            placeholder="输入账户密码"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            required
+          />
+        </div>
+        <Button
+          type="submit"
+          variant="primary"
+          size="lg"
+          className="login-submit-btn"
+          icon={<SignInIcon size={18} weight="bold" />}
+          disabled={busy || !retryReady}
+        >
+          {busy ? '正在登录…' : !retryReady ? '稍后重试' : '登录'}
+        </Button>
+      </form>
+      <div className="auth-card-footer">
+        <div className="auth-feature-pill">
+          <ShieldCheckIcon size={16} weight="duotone" />
+          <span>单人自用 · 12 小时安全会话 · 无公开注册</span>
+        </div>
+      </div>
+    </LayerCard>}
+    {phase !== 'login' && phase !== 'authenticated' && <LayerCard className="auth-card status-card">
+      <div className="auth-card-header">
+        <Text variant="heading" as="h2">
+          {phase === 'logout-pending' ? '退出待确认' : phase === 'unknown' ? '验证登录状态' : '恢复会话'}
+        </Text>
+        <div className={`auth-status-callout ${phase === 'unknown' || phase === 'logout-pending' ? 'error' : 'info'}`}>
+          {phase === 'unknown' || phase === 'logout-pending' ? (
+            <WarningCircleIcon size={18} weight="fill" className="status-callout-icon" />
+          ) : (
+            <InfoIcon size={18} weight="fill" className="status-callout-icon" />
+          )}
+          <Text role="status" variant={phase === 'unknown' || phase === 'logout-pending' ? 'error' : 'secondary'}>{message}</Text>
+        </div>
+      </div>
+      <div className="action-row centered">
+        {phase === 'logout-pending' && <Button variant="primary" size="lg" icon={<SignOutIcon />} disabled={busy} onClick={() => void logout()}>重试退出</Button>}
+        {phase === 'unknown' && <Button variant="secondary" size="lg" icon={<ArrowClockwiseIcon />} disabled={busy} onClick={() => void check()}>检查登录状态</Button>}
+      </div>
+    </LayerCard>}
+    {phase === 'authenticated' && <section className="workspace">
+      <div className="panel-heading workspace-header">
+        <div className="session-status-badge">
+          <span className="status-dot online" />
+          <Text role="status" variant="success">{message}</Text>
+        </div>
+        <div className="action-row">
+          <Button variant="ghost" size="sm" icon={<ArrowClockwiseIcon />} disabled={busy} onClick={() => void check()}>检查登录状态</Button>
+          <Button variant="secondary" size="sm" icon={<SignOutIcon />} onClick={() => void logout()}>退出登录</Button>
+        </div>
+      </div>
+      <nav className="workspace-tab-nav" aria-label="工作区导航">
+        <NavLink to="/" end className={({ isActive }) => buttonVariants({ variant: isActive ? 'primary' : 'secondary', size: 'sm' })}>
+          <ChatsIcon size={16} />
+          消息工作区
+        </NavLink>
+        <NavLink to="/files" className={({ isActive }) => buttonVariants({ variant: isActive ? 'primary' : 'secondary', size: 'sm' })}>
+          <FolderIcon size={16} />
+          服务器文件
+        </NavLink>
+      </nav>
+      {/* 草稿、发送与上传调度由会话层持有，切换视图不改变认证或任务生命周期。 */}
+      <Routes>
+        <Route path="/" element={<Messages exchange={exchange} files={files} />} />
+        <Route path="/files" element={<ServerFiles files={files} exchange={exchange} onExpired={expire} />} />
+      </Routes>
+    </section>}
+  </>
+}

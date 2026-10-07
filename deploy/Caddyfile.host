@@ -1,0 +1,17 @@
+# 独立 FileHop 入口，不导入或改写其他服务的配置。
+{
+	admin off
+	auto_https disable_redirects
+	servers {
+		protocols h1 h2
+	}
+}
+
+https://{$FILEHOP_DEV_HOST}:443 {
+	tls {
+		issuer acme {
+			disable_http_challenge
+		}
+	}
+	import caddy-dev.routes
+}
