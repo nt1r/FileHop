@@ -62,6 +62,9 @@ jobs:
       - name: Prepare verification tools
         run: |
           corepack enable pnpm
+          # 根目录没有 package.json，Corepack 不会从 -C 参数读取 Web 的版本约束。
+          # 与常规 CI 一样先固定版本，避免 runner 默认版本变化导致正式构建失败。
+          corepack prepare pnpm@12.5.1 --activate
           pnpm -C web install --frozen-lockfile
           pnpm -C web exec playwright install --with-deps --only-shell chromium
           curl --fail --location --max-time 60 --output /tmp/caddy.tar.gz https://github.com/caddyserver/caddy/releases/download/v2.11.4/caddy_2.11.4_linux_arm64.tar.gz
