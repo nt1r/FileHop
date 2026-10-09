@@ -149,8 +149,13 @@ private fun ColumnScope.Messages(screen: Screen, vm: HopViewModel) {
     val nearBottom by remember { derivedStateOf {
         list.layoutInfo.totalItemsCount == 0 || (list.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= list.layoutInfo.totalItemsCount - 2
     } }
+    var initiallyPositioned by remember { mutableStateOf(false) }
     LaunchedEffect(screen.messages.lastOrNull()?.id) {
-        if (nearBottom && screen.messages.isNotEmpty()) list.animateScrollToItem(screen.messages.lastIndex)
+        if (screen.messages.isNotEmpty()) {
+            if (!initiallyPositioned) list.scrollToItem(screen.messages.lastIndex)
+            else if (nearBottom) list.animateScrollToItem(screen.messages.lastIndex)
+            initiallyPositioned = true
+        }
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Text("消息", style = MaterialTheme.typography.titleLarge)
