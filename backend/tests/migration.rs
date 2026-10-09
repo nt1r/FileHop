@@ -67,7 +67,9 @@ async fn migration_refuses_missing_mismatched_and_partial_storage_without_replac
                     "history" => "DROP TABLE _sqlx_migrations",
                     "checksum" => "UPDATE _sqlx_migrations SET checksum=X'00'",
                     "dirty" => "UPDATE _sqlx_migrations SET success=0",
-                    _ => "UPDATE _sqlx_migrations SET version=9999",
+                    _ => {
+                        "UPDATE _sqlx_migrations SET version=9999 WHERE version=(SELECT MAX(version) FROM _sqlx_migrations)"
+                    }
                 };
                 sqlx::query(sql).execute(&mut db).await.unwrap();
                 db.close().await.unwrap();
@@ -199,6 +201,100 @@ async fn migrating_process_excludes_backend_and_second_migration() {
     sqlx::query("ROLLBACK").execute(&mut db).await.unwrap();
     db.close().await.unwrap();
     assert!(migration.0.wait().unwrap().success());
+}
+
+#[tokio::test]
+async fn released_schema_upgrade_preserves_web_session_account_and_text() {
+    use axum::{
+        body::{Body, to_bytes},
+        http::Request,
+    };
+    use sha2::{Digest, Sha256};
+    use sqlx::Connection;
+    use tower::ServiceExt;
+    let i = Instance::new();
+    let identity = uuid::Uuid::new_v4().to_string();
+    fs::write(i.database.join("storage-id"), &identity).unwrap();
+    fs::write(i.files.join("storage-id"), &identity).unwrap();
+    let old_migrations = tempfile::tempdir().unwrap();
+    // Frozen migration is byte-identical to the actual v0.1.0 release, not a made-up old schema.
+    fs::write(
+        old_migrations.path().join("0001_next_release.sql"),
+        include_str!("../migrations/0001_next_release.sql"),
+    )
+    .unwrap();
+    let mut db = sqlx::SqliteConnection::connect_with(
+        &sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(i.database.join("transfer.db"))
+            .create_if_missing(true),
+    )
+    .await
+    .unwrap();
+    sqlx::migrate::Migrator::new(old_migrations.path())
+        .await
+        .unwrap()
+        .run(&mut db)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO instance VALUES (1, ?)")
+        .bind(&identity)
+        .execute(&mut db)
+        .await
+        .unwrap();
+    use argon2::PasswordHasher;
+    let hash = argon2::Argon2::default()
+        .hash_password(b" synthetic password ")
+        .unwrap()
+        .to_string();
+    sqlx::query("INSERT INTO account VALUES (1, 'admin', ?)")
+        .bind(hash)
+        .execute(&mut db)
+        .await
+        .unwrap();
+    let token = "abcd".repeat(16);
+    sqlx::query("INSERT INTO session VALUES (?, unixepoch() + 43200)")
+        .bind(Sha256::digest(token.as_bytes()).to_vec())
+        .execute(&mut db)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO message (send_id,text,source_label,created_at) VALUES (?, 'retained text', 'Web', '2026-01-01T00:00:00Z')")
+        .bind(uuid::Uuid::new_v4().to_string()).execute(&mut db).await.unwrap();
+    db.close().await.unwrap();
+    assert!(i.command("migrate").output().unwrap().status.success());
+    let app = backend::app(i.database.clone(), i.files.clone());
+    let r = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/messages")
+                .header("cookie", format!("__Host-filehop={token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    let page: serde_json::Value =
+        serde_json::from_slice(&to_bytes(r.into_body(), 8192).await.unwrap()).unwrap();
+    assert_eq!(page["messages"][0]["text"], "retained text");
+    let r = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/native/session")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"username":"admin","password":" synthetic password "}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(
+        fs::read_to_string(i.files.join("storage-id")).unwrap(),
+        identity
+    );
 }
 
 #[tokio::test]
