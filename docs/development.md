@@ -78,6 +78,17 @@ Web 仅服务器文件页提供删除确认，操作上下文由文件页持有�
 
 ## 工具链与本地检查
 
+### 版本维护规则
+
+- 有 LTS 支持线的基础运行时（Java、Node）和 CI 操作系统优先采用仍受支持、与工具链兼容的 LTS；不自动追随最新大版本。Java 统一使用 Amazon Corretto，当前选择与补丁解析限制见 [Android 指南](android.md#工具链与构建)。
+- Rust、Gradle、AGP、Kotlin、pnpm 等不统一套用 LTS 要求；选择兼容的正式稳定版，排除 alpha、beta、RC。安全补丁及时评估更新，固定版本不代表长期停止维护。
+- 检查与发布采用相同的核心工具链版本配置，同名 Actions 统一版本并固定完整 commit SHA，旁注对应 release tag；升级须审阅上游兼容性和默认行为变化。Action 自带的 Node 运行时不同于项目的 Node 版本。
+- 核心工具尽量固定具体版本，应用依赖提交锁文件；下载的 SDK、Gradle、Caddy 等归档校验摘要。Corretto 大版本选择、runner 自带工具、未指定工具版本的 Buildx/BuildKit 和未固定 digest 的容器标签是明确的浮动项，不能据此宣称整个 CI 完全可复现。
+- GitHub 托管 runner 固定 Ubuntu LTS 系列（当前 `ubuntu-24.04` / `ubuntu-24.04-arm`），不使用 `ubuntu-latest`；这不锁定 runner 镜像补丁或预装工具。辅助工具先保留托管版本，出现实际兼容或复现问题再单独固定，不建立全工具版本矩阵。
+- 工具链与 Actions 更新通过显式提交及相应 CI 验证；涉及依赖、镜像或环境的更新按[测试规范](testing.md)执行完整检查。正式发布不消费 PR 缓存或特权产物；`setup-node` 显式关闭自动包管理器缓存，普通检查的 pnpm 缓存仍由独立步骤管理。执行结果留在 Issue/PR 与 CI 日志，不在本文维护临时通过清单。
+
+### 本地检查
+
 测试使用 Rust / Playwright / Bash，见[测试规范](testing.md)，不需要 Python。Bash 在 Linux 宿主机或 CI runner 上编排，需具备 Node、Cargo、Docker、curl 及标准 GNU 工具；不要求应用镜像提供这些宿主工具。
 
 - Node `24.21.0`（`.nvmrc`），pnpm `12.5.1`（`web/package.json` 的 `packageManager`）。使用随该 Node 版本提供的 Corepack：`corepack enable pnpm`，再执行 `corepack prepare pnpm@12.5.1 --activate`。
