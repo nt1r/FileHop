@@ -12,13 +12,14 @@ import { Badge } from '@cloudflare/kumo/components/badge'
 import { Button } from '@cloudflare/kumo/components/button'
 import { LayerCard } from '@cloudflare/kumo/components/layer-card'
 import { Text } from '@cloudflare/kumo/components/text'
-import { fileStateLabels, isMessage, type Message, type useMessages } from './messages'
+import { fileStateLabels, isMessage, validLabel, type Message, type useMessages } from './messages'
 import type { useFiles } from './files'
 import StorageUsage from './StorageUsage'
 import { useDeletion } from './deletion'
 import DeleteFile from './DeleteFile'
 import { formatBytes, formatMessageTime, getFileCategory, type FileCategory } from './format'
 import { FileTypeBadge } from './ui'
+import UploadTasks from './UploadTasks'
 
 type FileMessage = Extract<Message, { kind: 'FILE' }>
 
@@ -93,8 +94,10 @@ export default function ServerFiles({ files, exchange, onExpired }: { files: Ret
     if (alive.current && version === generation.current) setNotice(message)
   }
 
+  const canChooseFiles = typeof files.limits === 'number' && validLabel(exchange.label)
+
   function handleFileSelection(selectedFiles: File[]) {
-    if (!selectedFiles.length) return
+    if (!canChooseFiles || !selectedFiles.length) return
     void files.choose(selectedFiles, exchange.label)
   }
 
@@ -128,6 +131,8 @@ export default function ServerFiles({ files, exchange, onExpired }: { files: Ret
         ref={uploadInputRef}
         type="file"
         multiple
+        aria-label="选择要上传的文件"
+        disabled={!canChooseFiles}
         className="file-picker"
         style={{ display: 'none' }}
         onChange={e => {
@@ -149,7 +154,7 @@ export default function ServerFiles({ files, exchange, onExpired }: { files: Ret
                 服务器文件
               </Text>
               <Text variant="secondary" size="sm" DANGEROUS_className="server-files-main-subtitle">
-                安全存储 · 随时访问 · 高效管理
+                查看、下载和清理已上传的文件
               </Text>
             </div>
           </div>
@@ -160,7 +165,12 @@ export default function ServerFiles({ files, exchange, onExpired }: { files: Ret
               className="server-tool-btn"
               aria-label="搜索文件"
               title="搜索文件"
-              onClick={() => setSearchOpen(prev => !prev)}
+              aria-expanded={searchOpen}
+              aria-controls="server-files-search"
+              onClick={() => {
+                if (searchOpen) setSearchQuery('')
+                setSearchOpen(prev => !prev)
+              }}
             >
               <MagnifyingGlassIcon size={18} />
             </button>
@@ -169,6 +179,7 @@ export default function ServerFiles({ files, exchange, onExpired }: { files: Ret
               className="server-plus-btn"
               aria-label="上传文件"
               title="上传文件"
+              disabled={!canChooseFiles}
               onClick={() => uploadInputRef.current?.click()}
             >
               <PlusIcon size={20} weight="bold" />
@@ -190,7 +201,9 @@ export default function ServerFiles({ files, exchange, onExpired }: { files: Ret
           <div className="server-files-search-row">
             <input
               type="search"
-              placeholder="搜索服务器文件名..."
+              id="server-files-search"
+              aria-label="搜索已加载文件名"
+              placeholder="搜索已加载文件名..."
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               className="server-files-search-input"
@@ -203,6 +216,7 @@ export default function ServerFiles({ files, exchange, onExpired }: { files: Ret
         <div className="server-category-grid">
           <button
             type="button"
+            aria-pressed={selectedCategory === 'document'}
             className={`server-category-card ${selectedCategory === 'document' ? 'selected' : ''}`}
             onClick={() => setSelectedCategory(prev => prev === 'document' ? null : 'document')}
           >
@@ -215,6 +229,7 @@ export default function ServerFiles({ files, exchange, onExpired }: { files: Ret
 
           <button
             type="button"
+            aria-pressed={selectedCategory === 'image'}
             className={`server-category-card ${selectedCategory === 'image' ? 'selected' : ''}`}
             onClick={() => setSelectedCategory(prev => prev === 'image' ? null : 'image')}
           >
@@ -227,6 +242,7 @@ export default function ServerFiles({ files, exchange, onExpired }: { files: Ret
 
           <button
             type="button"
+            aria-pressed={selectedCategory === 'video'}
             className={`server-category-card ${selectedCategory === 'video' ? 'selected' : ''}`}
             onClick={() => setSelectedCategory(prev => prev === 'video' ? null : 'video')}
           >
@@ -239,6 +255,7 @@ export default function ServerFiles({ files, exchange, onExpired }: { files: Ret
 
           <button
             type="button"
+            aria-pressed={selectedCategory === 'other'}
             className={`server-category-card ${selectedCategory === 'other' ? 'selected' : ''}`}
             onClick={() => setSelectedCategory(prev => prev === 'other' ? null : 'other')}
           >
@@ -249,6 +266,12 @@ export default function ServerFiles({ files, exchange, onExpired }: { files: Ret
             <div className="category-card-count">{categoryCounts.other} 项</div>
           </button>
         </div>
+
+        <Text variant="secondary" size="sm">
+          分类数量、搜索和筛选仅针对已加载文件；再次点击分类可取消筛选。
+        </Text>
+
+        <UploadTasks files={files} />
 
         {/* Storage Quota Section */}
         <StorageUsage refresh={usageRefresh} onExpired={onExpired} />
@@ -264,14 +287,14 @@ export default function ServerFiles({ files, exchange, onExpired }: { files: Ret
               最近文件
             </Text>
             <div className="server-recent-sort">
-              <span>按修改时间 ↓</span>
+              <span>按上传时间从新到旧</span>
             </div>
           </div>
 
           {!busy && !notice && filteredFiles.length === 0 && (
             <div className="server-empty-state">
               <Text variant="secondary">
-                {selectedCategory || searchQuery ? '未找到符合条件的文件。' : '暂无服务器文件。'}
+                {selectedCategory || searchQuery ? '已加载文件中没有匹配项。' : '暂无服务器文件。'}
               </Text>
             </div>
           )}
@@ -342,17 +365,19 @@ export default function ServerFiles({ files, exchange, onExpired }: { files: Ret
         <div
           className={`server-dropzone-box ${dragging ? 'dragging' : ''}`}
           role="button"
-          tabIndex={0}
+          tabIndex={canChooseFiles ? 0 : -1}
+          aria-disabled={!canChooseFiles}
           aria-label="拖拽或点击上传文件"
-          onClick={() => uploadInputRef.current?.click()}
+          onClick={() => { if (canChooseFiles) uploadInputRef.current?.click() }}
           onKeyDown={e => {
-            if (e.key === 'Enter' || e.key === ' ') {
+            if (canChooseFiles && (e.key === 'Enter' || e.key === ' ')) {
+              e.preventDefault()
               uploadInputRef.current?.click()
             }
           }}
           onDragOver={e => {
             e.preventDefault()
-            setDragging(true)
+            if (canChooseFiles) setDragging(true)
           }}
           onDragLeave={() => setDragging(false)}
           onDrop={e => {

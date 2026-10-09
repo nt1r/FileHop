@@ -25,7 +25,9 @@ export async function verifyServerFiles(page: Page) {
   const usage = listing.getByRole('region', { name: '应用文件额度', exact: true })
   await expect(usage).toContainText('总额度：1 GB')
   await expect(usage).toContainText('上传预留：16 B')
-  await expect(listing.getByText(names[0], { exact: false })).toHaveCount(0)
+  await expect(listing.getByRole('article').filter({ hasText: names[0] })).toHaveCount(0)
+  await expect(listing.getByRole('region', { name: '文件上传任务' })).toContainText(names[0])
+  await expect(listing.getByRole('button', { name: '中断传输' })).toBeVisible()
   // 切页不能停止串行队列，后续项在文件页仍按选择顺序接续。
   for (const [index, name] of names.entries()) {
     await expect.poll(() => releases.size).toBe(index + 1)

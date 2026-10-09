@@ -91,4 +91,3 @@ export function getAvatarColor(label?: string): { bg: string; text: string } {
   const bg = AVATAR_COLORS[hash % AVATAR_COLORS.length]
   return { bg, text: '#ffffff' }
 }
-
