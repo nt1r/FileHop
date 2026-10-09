@@ -17,7 +17,9 @@ export async function verifyHistory(page: Page) {
   await expect(older).toBeVisible()
   const anchor = articles.filter({ hasText: 'paged history 60\n' })
   await anchor.scrollIntoViewIfNeeded()
-  const y = (await anchor.boundingBox())!.y
+  // 保持的是列表内阅读位置；发送反馈等外围布局变化允许移动整个列表。
+  const anchorOffset = async () => (await anchor.boundingBox())!.y - (await page.getByLabel('消息历史', { exact: true }).boundingBox())!.y
+  const y = await anchorOffset()
   let firstBoundary = ''
   await page.route('**/api/messages?before=*', async route => {
     firstBoundary = route.request().url()
@@ -31,7 +33,7 @@ export async function verifyHistory(page: Page) {
   await older.click()
   expect((await retry).url()).toBe(firstBoundary)
   await expect(articles).toHaveCount(100)
-  expect(Math.abs((await anchor.boundingBox())!.y - y)).toBeLessThan(2)
+  expect(Math.abs(await anchorOffset() - y)).toBeLessThan(2)
 
   // 阅读旧内容时发送和最近页读取不得抢走位置，同一服务器消息合并后只出现一次。
   await page.getByLabel('正文', { exact: true }).fill('new while reading history')
@@ -39,7 +41,7 @@ export async function verifyHistory(page: Page) {
   await expect(page.getByLabel('正文', { exact: true })).toHaveValue('')
   await page.getByRole('button', { name: '读取最近消息' }).click()
   await expect(articles.filter({ hasText: 'new while reading history' })).toHaveCount(1)
-  expect(Math.abs((await anchor.boundingBox())!.y - y)).toBeLessThan(2)
+  expect(Math.abs(await anchorOffset() - y)).toBeLessThan(2)
   await older.click()
   await expect(articles.filter({ hasText: 'paged history 0\n' })).toHaveCount(1)
   await expect(page.getByRole('button', { name: '读取最近消息' })).toBeEnabled()
@@ -67,6 +69,7 @@ export async function verifyHistory(page: Page) {
   })
   await older.click()
   await received
+  await page.getByRole('button', { name: '用户头像' }).click()
   await page.getByRole('button', { name: '退出登录' }).click()
   await expect(page.getByRole('region', { name: '消息流' })).toHaveCount(0)
   const late = page.waitForResponse('**/api/messages?before=*')

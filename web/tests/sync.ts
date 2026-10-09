@@ -174,6 +174,7 @@ export async function verifySync(page: Page) {
     else {
       const other = await page.context().newPage()
       await other.goto('/')
+      await other.getByRole('button', { name: '用户头像' }).click()
       await other.getByRole('button', { name: '退出登录' }).click()
       await expect(other.getByLabel('用户名')).toBeVisible()
       await other.close()

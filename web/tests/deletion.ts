@@ -49,6 +49,8 @@ async function verifyUnknownDeletion(page: Page) {
   await expect(item.getByRole('link')).toBeVisible()
   const id = (await item.getByRole('link').getAttribute('href'))!.split('/').at(-1)!
   await filesPage(page)
+  // 先等本页文件出现，再等刷新完成；挂载前的 enabled 状态不代表初始读取已结束。
+  await expect(item.getByRole('link')).toBeVisible()
   await expect(page.getByRole('button', { name: '刷新文件列表' })).toBeEnabled()
   let deletes = 0
   let reads = 0
@@ -79,6 +81,7 @@ async function verifyUnknownDeletion(page: Page) {
   await expect(item).not.toContainText('删除结果未确认')
   await expect(item.getByRole('link')).toBeVisible()
   await filesPage(page)
+  await expect(item.getByRole('link')).toBeVisible()
   await expect(item).not.toContainText('删除结果未确认')
   await expect(item.getByRole('button', { name: '删除服务器文件', exact: true })).toBeVisible()
   // 真正接受删除后丢弃响应，仍须用户刷新，不能自动查询或宣称完成。
@@ -140,19 +143,19 @@ async function verifyCleanup(page: Page) {
   await mkdir(entity)
   await filesPage(page)
   const usage = page.getByRole('region', { name: '应用文件额度', exact: true })
-  await expect(usage).toContainText('待清理占用：0 字节')
+  await expect(usage).toContainText('待清理占用：0 B')
   page.once('dialog', dialog => dialog.accept())
   await item.getByRole('button', { name: '删除服务器文件', exact: true }).click()
   await expect(item).toContainText('删除处理中，空间尚未释放')
-  await expect(usage).toContainText('待清理占用：0 字节')
+  await expect(usage).toContainText('待清理占用：0 B')
   await refresh(page)
-  await expect(usage).toContainText('待清理占用：7 字节')
+  await expect(usage).toContainText('待清理占用：7 B')
   await expect(item.getByRole('link')).toHaveCount(0)
   await rmdir(entity)
   await deleted(page, id)
   await refresh(page)
   await expect(item).toHaveCount(0)
-  await expect(usage).toContainText('待清理占用：0 字节')
+  await expect(usage).toContainText('待清理占用：0 B')
   await messagesPage(page)
   await expect(item).toContainText('服务器文件已删除')
 }

@@ -42,6 +42,7 @@ test('administrator initializes storage and the page observes the real status', 
   await expect(page.getByRole('region', { name: '消息流' })).toBeVisible()
 
   await page.route('**/api/session', route => route.fulfill({ status: 401, contentType: 'text/html', body: 'Access gate' }))
+  await page.getByRole('button', { name: '用户头像' }).click()
   await page.getByRole('button', { name: '检查登录状态' }).click()
   await expect(page.getByRole('status')).toContainText('无法确认登录状态')
   await expect(page.getByRole('region', { name: '消息流' })).toBeVisible()
@@ -58,6 +59,7 @@ test('administrator initializes storage and the page observes the real status', 
     await held
     await route.fulfill({ response })
   })
+  await page.getByRole('button', { name: '用户头像' }).click()
   await page.getByRole('button', { name: '检查登录状态' }).click()
   await arrived
   await page.clock.fastForward(10_000)

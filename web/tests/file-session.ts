@@ -71,6 +71,7 @@ export async function verifyFileSession(page: Page) {
   await page.locator('input[type="file"]').setInputFiles(['expired-prepare.txt', 'discard-wait.txt'].map(name => ({ name, mimeType: 'text/plain', buffer: Buffer.alloc(0) })))
   await expect.poll(() => prepareArrived).toBe(true)
   await page.evaluate(() => fetch('/api/session', { method: 'DELETE' }))
+  await page.getByRole('button', { name: '用户头像' }).click()
   await page.getByRole('button', { name: '检查登录状态' }).click()
   await expect(page.getByText(/等待文件需重新选择/)).toBeVisible()
   await expect(page.locator('.upload-task')).toHaveCount(0)

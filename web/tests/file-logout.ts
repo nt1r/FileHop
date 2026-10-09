@@ -23,6 +23,7 @@ export async function verifyFileLogout(page: Page) {
   await expect.poll(() => started.length).toBe(1)
   await expect(page.locator('.upload-task').filter({ hasText: names[3] })).toContainText('等待上传')
   // 同源退出只中断本地请求并清空页面，不调用服务器停止；旧成功仍允许出现在历史。
+  await other.getByRole('button', { name: '用户头像' }).click()
   await other.getByRole('button', { name: '退出登录' }).click()
   await expect(page.getByRole('region', { name: '消息流' })).toHaveCount(0)
   expect(stopped).toHaveLength(0)

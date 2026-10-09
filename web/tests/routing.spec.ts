@@ -30,6 +30,7 @@ test('deep links, authentication redirects and history preserve the workspace', 
   await expect(page.getByRole('region', { name: '服务器文件' })).toBeVisible()
   // 认证失效保留公共层中的草稿，重登仍回到当前文件页。
   await page.evaluate(() => fetch('/api/session', { method: 'DELETE' }))
+  await page.getByRole('button', { name: '用户头像' }).click()
   await page.getByRole('button', { name: '检查登录状态' }).click()
   await expect(page).toHaveURL(/\/login\?next=%2Ffiles$/)
   await page.getByLabel('用户名').fill('Admin')
@@ -42,6 +43,7 @@ test('deep links, authentication redirects and history preserve the workspace', 
   await page.goto('/login?next=https://example.invalid')
   await expect(page).toHaveURL(new URL('/', process.env.TEST_BASE_URL!).href)
   await page.getByRole('link', { name: '服务器文件', exact: true }).click()
+  await page.getByRole('button', { name: '用户头像' }).click()
   await page.getByRole('button', { name: '退出登录', exact: true }).click()
   await expect(page).toHaveURL(/\/login$/)
   await expect(page.getByLabel('用户名')).toBeVisible()
