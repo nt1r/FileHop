@@ -2,7 +2,11 @@ import { expect, type Page } from '@playwright/test'
 import { readFile, unlink, mkdir, rmdir } from 'node:fs/promises'
 import { join } from 'node:path'
 
-const filesPage = (page: Page) => page.getByRole('link', { name: '服务器文件', exact: true }).click()
+const filesPage = async (page: Page) => {
+  await page.getByRole('link', { name: '服务器文件', exact: true }).click()
+  // Navigation click completion is not a committed view: the message page has matching file links.
+  await expect(page.getByRole('region', { name: '服务器文件', exact: true })).toBeVisible()
+}
 const messagesPage = (page: Page) => page.getByRole('link', { name: '消息工作区' }).click()
 const row = (page: Page, name: string) => page.getByRole('article').filter({ hasText: name })
 const refresh = (page: Page) => page.getByRole('button', { name: '刷新文件列表' }).click()
