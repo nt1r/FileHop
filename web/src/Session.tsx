@@ -1,14 +1,28 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { ArrowClockwiseIcon, ChatsIcon, ClockCountdownIcon, FolderIcon, InfoIcon, ShieldCheckIcon, SignInIcon, SignOutIcon, WarningCircleIcon } from '@phosphor-icons/react'
-import { Button, buttonVariants } from '@cloudflare/kumo/components/button'
+import {
+  ArrowClockwiseIcon,
+  CaretDownIcon,
+  ChatCircleDotsIcon,
+  ClockCountdownIcon,
+  FolderIcon,
+  InfoIcon,
+  PaperPlaneTiltIcon,
+  ShieldCheckIcon,
+  SignInIcon,
+  SignOutIcon,
+  UserIcon,
+  WarningCircleIcon,
+} from '@phosphor-icons/react'
+import { Button } from '@cloudflare/kumo/components/button'
 import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { Input } from '@cloudflare/kumo/components/input'
 import { LayerCard } from '@cloudflare/kumo/components/layer-card'
 import { Text } from '@cloudflare/kumo/components/text'
 import Messages from './Messages'
 import ServerFiles from './ServerFiles'
-import { useMessages } from './messages'
+import { useMessages, validLabel } from './messages'
 import { useFiles } from './files'
+import { UserAvatar } from './ui'
 
 type Session = { expires_at: number; server_time: number }
 type Phase = 'checking' | 'login' | 'authenticated' | 'unknown' | 'logout-pending'
@@ -72,6 +86,27 @@ export default function SessionPage({ onAuthenticatedChange }: { onAuthenticated
   const channel = useRef<BroadcastChannel | null>(null)
   const deadline = useRef<number | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false)
+      }
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [menuOpen])
+
   const exchange = useMessages(phase === 'authenticated', expire)
   const files = useFiles(phase === 'authenticated', expire, exchange.receivedFile, exchange.refreshFileStates)
 
@@ -327,26 +362,121 @@ export default function SessionPage({ onAuthenticatedChange }: { onAuthenticated
       </div>
     </LayerCard>}
     {phase === 'authenticated' && <section className="workspace">
-      <div className="panel-heading workspace-header">
-        <div className="session-status-badge">
-          <span className="status-dot online" />
-          <Text role="status" variant="success">{message}</Text>
+      <div className="workspace-header-bar">
+        <div className="workspace-nav-left">
+          <div className="brand-mark">
+            <div className="brand-icon-mini">
+              <PaperPlaneTiltIcon size={20} weight="fill" />
+            </div>
+            <Text variant="heading" as="h1" DANGEROUS_className="brand-title">FileHop</Text>
+          </div>
+          <nav className="workspace-tab-nav" aria-label="工作区导航">
+            <NavLink
+              to="/"
+              end
+              aria-label="消息工作区"
+              className={({ isActive }) => `workspace-tab-link ${isActive ? 'active' : ''}`}
+            >
+              <ChatCircleDotsIcon size={18} weight="bold" />
+              <span>对话</span>
+            </NavLink>
+            <NavLink
+              to="/files"
+              className={({ isActive }) => `workspace-tab-link ${isActive ? 'active' : ''}`}
+            >
+              <FolderIcon size={18} weight="bold" />
+              <span>服务器文件</span>
+            </NavLink>
+          </nav>
         </div>
-        <div className="action-row">
-          <Button variant="ghost" size="sm" icon={<ArrowClockwiseIcon />} disabled={busy} onClick={() => void check()}>检查登录状态</Button>
-          <Button variant="secondary" size="sm" icon={<SignOutIcon />} onClick={() => void logout()}>退出登录</Button>
+        {message !== '登录成功。' && (
+          <div className="session-status-badge session-error-badge">
+            <WarningCircleIcon size={16} weight="fill" />
+            <Text role="status" variant="error">{message}</Text>
+          </div>
+        )}
+        <div className="workspace-header-actions" ref={menuRef}>
+          <div className="user-avatar-menu-wrapper">
+            <button
+              type="button"
+              className="user-avatar-btn"
+              aria-label="用户头像"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen(prev => !prev)}
+              title={`设备身份：${exchange.label}`}
+            >
+              <UserAvatar label={exchange.label} size={34} />
+              <CaretDownIcon size={13} weight="bold" className="user-avatar-caret" />
+            </button>
+
+            <div
+              className={`user-menu-popover ${menuOpen ? 'open' : ''}`}
+              role="menu"
+              aria-label="用户设置"
+            >
+              <div className="user-menu-header">
+                <UserAvatar label={exchange.label} size={38} />
+                <div className="user-menu-meta">
+                  <div className="user-menu-meta-title-row">
+                    <UserIcon size={15} weight="bold" className="text-brand" />
+                    <Text variant="heading3" as="h3">个人中心</Text>
+                  </div>
+                  <Text variant="secondary" size="xs">当前设备：{exchange.label}</Text>
+                </div>
+              </div>
+
+              <div className="user-menu-field">
+                <Input
+                  label="来源标签"
+                  size="sm"
+                  value={exchange.label}
+                  placeholder="设置身份标签"
+                  error={validLabel(exchange.label) ? undefined : '须 1–64 字符'}
+                  onChange={e => exchange.setLabel(e.target.value)}
+                  onBlur={() => exchange.saveLabel(exchange.label)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      exchange.saveLabel(exchange.label)
+                      setMenuOpen(false)
+                    }
+                  }}
+                />
+              </div>
+
+              <div className="user-menu-divider" />
+
+              <div className="user-menu-items">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="user-menu-item-btn"
+                  icon={<ArrowClockwiseIcon size={15} />}
+                  disabled={busy}
+                  onClick={() => {
+                    setMenuOpen(false)
+                    void check()
+                  }}
+                >
+                  检查登录状态
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="user-menu-item-btn user-menu-logout-btn"
+                  icon={<SignOutIcon size={15} />}
+                  onClick={() => {
+                    setMenuOpen(false)
+                    void logout()
+                  }}
+                >
+                  退出登录
+                </Button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
-      <nav className="workspace-tab-nav" aria-label="工作区导航">
-        <NavLink to="/" end className={({ isActive }) => buttonVariants({ variant: isActive ? 'primary' : 'secondary', size: 'sm' })}>
-          <ChatsIcon size={16} />
-          消息工作区
-        </NavLink>
-        <NavLink to="/files" className={({ isActive }) => buttonVariants({ variant: isActive ? 'primary' : 'secondary', size: 'sm' })}>
-          <FolderIcon size={16} />
-          服务器文件
-        </NavLink>
-      </nav>
       {/* 草稿、发送与上传调度由会话层持有，切换视图不改变认证或任务生命周期。 */}
       <Routes>
         <Route path="/" element={<Messages exchange={exchange} files={files} />} />

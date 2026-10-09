@@ -67,6 +67,7 @@ export async function verifyHistory(page: Page) {
   })
   await older.click()
   await received
+  await page.getByRole('button', { name: '用户头像' }).click()
   await page.getByRole('button', { name: '退出登录' }).click()
   await expect(page.getByRole('region', { name: '消息流' })).toHaveCount(0)
   const late = page.waitForResponse('**/api/messages?before=*')

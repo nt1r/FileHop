@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { HardDriveIcon } from '@phosphor-icons/react'
 import { Text } from '@cloudflare/kumo/components/text'
+import { formatBytes } from './format'
 
 type Usage = { quota_bytes: string; saved_bytes: string; reserved_bytes: string; cleaning_bytes: string; available_bytes: string; over_quota: boolean }
 const fields = ['quota_bytes', 'saved_bytes', 'reserved_bytes', 'cleaning_bytes', 'available_bytes'] as const
@@ -54,7 +55,7 @@ export default function StorageUsage({ refresh, onExpired }: { refresh: number; 
     return () => { alive = false; generation++; document.removeEventListener('visibilitychange', visible) }
   }, [refresh])
 
-  const bytes = (value: string) => `${BigInt(value).toLocaleString('zh-CN')} 字节`
+  const bytes = (value: string) => formatBytes(BigInt(value))
 
   const quota = usage ? BigInt(usage.quota_bytes) : 0n
   const saved = usage ? BigInt(usage.saved_bytes) : 0n
