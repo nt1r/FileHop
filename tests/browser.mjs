@@ -15,14 +15,20 @@ while (Date.now() < deadline) {
 }
 if (!backend) throw new Error('Backend startup timed out')
 const root = resolve('web/dist')
-let diagnosticRequest = 0
+// Bounded, failure-only diagnostics for the stalled status-query regression.
+// Record phases, not headers, credentials, file identifiers or request/response bodies.
+let queryId = 0
+const queryEvents = []
+function queryEvent(id, phase, status) {
+  queryEvents.push({ id, phase, status, at: Math.round(performance.now()) })
+  if (queryEvents.length > 32) queryEvents.shift()
+}
 const server = createServer(async (request, response) => {
-  const diagnostic = process.env.FILEHOP_DIAG_REQUESTS === '1' && request.url === '/api/files/status-query'
-  const id = diagnostic ? ++diagnosticRequest : 0
-  if (diagnostic) {
-    console.error(`[DEBUG-filehop-query] ${id} proxy received`)
-    response.once('finish', () => console.error(`[DEBUG-filehop-query] ${id} proxy finished ${response.statusCode}`))
-    response.once('close', () => console.error(`[DEBUG-filehop-query] ${id} proxy closed`))
+  const id = request.url === '/api/files/status-query' ? ++queryId : 0
+  if (id) {
+    queryEvent(id, 'proxy_received')
+    response.once('finish', () => queryEvent(id, 'proxy_finished', response.statusCode))
+    response.once('close', () => queryEvent(id, 'proxy_closed'))
   }
   try {
     if (request.url.startsWith('/api/')) {
@@ -36,7 +42,7 @@ const server = createServer(async (request, response) => {
         ...(['POST', 'PUT'].includes(request.method) ? { body: request, duplex: 'half' } : {}),
         signal: AbortSignal.timeout(transfer ? 31 * 60 * 1000 : 30000),
       })
-      if (diagnostic) console.error(`[DEBUG-filehop-query] ${id} upstream headers ${upstream.status}`)
+      if (id) queryEvent(id, 'upstream_headers', upstream.status)
       response.writeHead(upstream.status, Object.fromEntries(upstream.headers))
       if (upstream.body && request.method !== 'HEAD') Readable.fromWeb(upstream.body).pipe(response)
       else response.end()
@@ -56,6 +62,7 @@ const child = spawn('pnpm', ['-C', 'web', 'run', 'test:e2e', process.env.TEST_SP
 })
 for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => child.kill(signal))
 const code = await new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', code => resolve(code ?? 1)) })
+if (code !== 0) console.error('Browser fixture status-query phases:', JSON.stringify(queryEvents))
 server.closeAllConnections()
 await new Promise(resolve => server.close(resolve))
 process.exitCode = code
