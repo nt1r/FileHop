@@ -10,7 +10,7 @@
 | 桌面文件传输 | [002](specs/002-desktop-file-transfer.md) | 原版验收通过，见 [#33](https://github.com/nt1r/FileHop/issues/33)；Spec 007 B 单轮/串行及 C 登录失效后丢弃文件批次已实现 |
 | 服务器文件管理 | [003](specs/003-server-file-management.md) | 已实现；桌面验收由 [#60](https://github.com/nt1r/FileHop/issues/60)/PR #73 收口，主票 [#52](https://github.com/nt1r/FileHop/issues/52) 复用既有证据，不重做验收 |
 
-现有鉴权、准备幂等、额度、存储删除与恢复保护保留；上传强停止/后继重传及客户端自动协调按用户确认撤销，不借机重写存储。原生认证尚未实现，S002-F17、S003-M13 的原生部分留给 Android 切片。
+现有鉴权、准备幂等、额度、存储删除与恢复保护保留；上传强停止/后继重传及客户端自动协调按用户确认撤销，不借机重写存储。原生认证及 S002-F17、S003-M13 的原生部分随 Android 切片实施，集成进度见 [PR #112](https://github.com/nt1r/FileHop/pull/112)，不据此宣告真机或发布验收完成。
 
 ## 当前改造：已实现流程精简
 
@@ -35,7 +35,7 @@ PR #87 的独立迁移、实例互斥和内部就绪检查已复用；#83 及 v0
 - [Spec 005](specs/005-android-text-loop.md) / [#99](https://github.com/nt1r/FileHop/issues/99)：范围已确认，先做登录、文本交换和复制，实际手机验证即可；罕见异常遇到再处理。
 - [Spec 006](specs/006-android-files.md)：再做串行上传/下载，系统选择文件和保存位置。不做应用内本地下载管理；服务器清理先用 Web。
 
-Spec 005 已按确认范围拆为 [#100](https://github.com/nt1r/FileHop/issues/100) 登录与读取、[#101](https://github.com/nt1r/FileHop/issues/101) 双向文本与历史、[#102](https://github.com/nt1r/FileHop/issues/102) 签名 APK 与更新；#100 的 Web 正式自用前置条件已满足，#101/#102 均依赖 #100；后续实施仍按用户授权推进。Spec 006 保持概要，不提前拆票。不锁死内部状态机或建设全部测试。实际开工时确定手机系统与工具链，SDK/最低版本不凭空承诺。
+Spec 005 已按确认范围拆为 [#100](https://github.com/nt1r/FileHop/issues/100) 登录与读取、[#101](https://github.com/nt1r/FileHop/issues/101) 双向文本与历史、[#102](https://github.com/nt1r/FileHop/issues/102) 签名 APK 与更新；#100 的 Web 正式自用前置条件已满足，#101/#102 均依赖 #100；后续实施仍按用户授权推进。Spec 006 保持概要，不提前拆票。不锁死内部状态机或建设全部测试。首版已确定 Android 16 / API 36，使用 GitHub 托管 x86-64 runner 的官方 SDK 构建，工具链、安装及待授权签名配置见 [Android 指南](android.md)。
 
 ## 完成标准
 

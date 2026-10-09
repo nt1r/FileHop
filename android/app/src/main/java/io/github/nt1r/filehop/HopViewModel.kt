@@ -130,6 +130,9 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     private fun accept(value: Session) {
+        if (value.localExpiry <= System.currentTimeMillis()) {
+            invalidate(false, "登录已到期，请重新登录"); return
+        }
         try { store.save(value) } catch (_: Exception) {
             invalidate(false, "无法安全保存凭证，请重新登录"); return
         }
@@ -250,6 +253,9 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun send() {
         if (screen.phase != Phase.Ready || screen.pending != null || !TextRules.validText(screen.draft)) return
+        if (SystemClock.elapsedRealtime() < retryUntil) {
+            feedback("请求过多，请稍后再发送"); return
+        }
         val attempt = Attempt(UUID.randomUUID().toString(), screen.draft, screen.label)
         screen = screen.copy(pending = attempt)
         resolve(query = false, first = true)
@@ -279,6 +285,7 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     fun abandon() {
+        if (screen.sending) return
         screen = screen.copy(pending = null, sending = false, notice = "原消息可能已保存；再次发送可能重复")
     }
 }

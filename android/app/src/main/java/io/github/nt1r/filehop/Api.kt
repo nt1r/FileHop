@@ -41,17 +41,22 @@ class Api(private val origin: String) {
         } catch (e: ApiFailure) { throw e }
         catch (_: IOException) { throw ApiFailure() }
     }
-    private fun session(json: JSONObject, token: String): Session {
+    private fun session(json: JSONObject, token: String, startedAt: Long): Session {
         require(token.length == 64 && token.all { it in "0123456789abcdefABCDEF" })
         val remaining = json.getLong("expires_at") - json.getLong("server_time")
         require(remaining in 1..43_200)
-        return Session(token, System.currentTimeMillis() + remaining * 1000)
+        // Use request start, not response arrival, so network delay cannot extend known expiry.
+        return Session(token, startedAt + remaining * 1000)
     }
     suspend fun login(username: String, password: String): Session {
+        val startedAt = System.currentTimeMillis()
         val json = request("POST", "/api/native/session", data = JSONObject().put("username", username).put("password", password))
-        return session(json, json.getString("token"))
+        return session(json, json.getString("token"), startedAt)
     }
-    suspend fun check(token: String): Session = session(request("GET", "/api/native/session", token), token)
+    suspend fun check(token: String): Session {
+        val startedAt = System.currentTimeMillis()
+        return session(request("GET", "/api/native/session", token), token, startedAt)
+    }
     suspend fun logout(token: String) { request("DELETE", "/api/native/session", token) }
     private fun message(json: JSONObject) = Message(json.getString("id").toLong(), json.getString("send_id"),
         json.getString("kind"), json.optString("text"), json.getString("source_label"), json.getString("created_at"),

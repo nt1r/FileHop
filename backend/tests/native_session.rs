@@ -78,6 +78,97 @@ async fn body(r: axum::response::Response) -> Value {
 }
 
 #[tokio::test]
+async fn native_session_survives_router_restart_without_persisting_the_raw_token() {
+    use sqlx::Connection;
+    let f = Fixture::new().await;
+    // Hold a real snapshot so the WAL cannot disappear during the disk-content check.
+    let mut observer = sqlx::SqliteConnection::connect_with(
+        &sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(f.root.path().join("database/transfer.db"))
+            .read_only(true),
+    )
+    .await
+    .unwrap();
+    let mut snapshot = observer.begin().await.unwrap();
+    sqlx::query("SELECT name FROM sqlite_schema")
+        .fetch_all(&mut *snapshot)
+        .await
+        .unwrap();
+    let login = f.login().await;
+    let token = login["token"].as_str().unwrap();
+    for entry in std::fs::read_dir(f.root.path().join("database")).unwrap() {
+        let bytes = std::fs::read(entry.unwrap().path()).unwrap();
+        assert!(
+            !bytes
+                .windows(token.len())
+                .any(|window| window == token.as_bytes())
+        );
+    }
+    snapshot.rollback().await.unwrap();
+    observer.close().await.unwrap();
+    let clock = f.clock.clone();
+    let restarted = backend::app_with_config(
+        f.root.path().join("database"),
+        f.root.path().join("files"),
+        backend::session::Config {
+            now: Arc::new(move || clock.load(Ordering::SeqCst)),
+            ..Default::default()
+        },
+    );
+    let r = restarted
+        .oneshot(
+            Request::builder()
+                .uri("/api/native/session")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert_eq!(body(r).await["expires_at"], login["expires_at"]);
+}
+
+#[tokio::test]
+async fn native_and_web_logins_share_the_failure_budget() {
+    let f = Fixture::new().await;
+    for index in 0..10 {
+        let path = if index % 2 == 0 {
+            "/api/native/session"
+        } else {
+            "/api/session"
+        };
+        let r = f
+            .app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(path)
+                    .header("origin", "https://filehop.invalid")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({"username":"Admin","password":" incorrect password "}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
+    }
+    let r = f
+        .request(
+            "POST",
+            "/api/native/session",
+            None,
+            json!({"username":"Admin","password":" synthetic password "}),
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert!(r.headers().contains_key("retry-after"));
+}
+
+#[tokio::test]
 async fn credential_types_mixed_headers_logout_and_password_reset() {
     let f = Fixture::new().await;
     let login = f.login().await;

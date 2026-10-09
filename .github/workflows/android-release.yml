@@ -1,0 +1,109 @@
+name: Publish Android APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Existing published Web/backend release tag (vMAJOR.MINOR.PATCH)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-release
+  cancel-in-progress: false
+
+jobs:
+  android-release:
+    if: github.repository == 'nt1r/FileHop' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify trusted release source and increasing Android version
+        shell: bash
+        env:
+          PUBLICATION_APPROVED_SHA: ${{ vars.FILEHOP_PUBLICATION_APPROVED_SHA }}
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^v(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})$ ]]
+          major=${BASH_REMATCH[1]}; minor=${BASH_REMATCH[2]}; patch=${BASH_REMATCH[3]}
+          code=$((major * 1000000 + minor * 1000 + patch))
+          (( code > 0 && code <= 2100000000 ))
+          sha=$(git rev-parse "refs/tags/$VERSION^{commit}")
+          git merge-base --is-ancestor "$sha" origin/main
+          [[ $(gh api repos/nt1r/FileHop/branches/main --jq .protected) == true ]]
+          [[ "$PUBLICATION_APPROVED_SHA" == "$sha" ]]
+          gh release view "$VERSION" --repo nt1r/FileHop --json isDraft,isPrerelease,assets > "$RUNNER_TEMP/target-release.json"
+          jq -e '.isDraft == false and .isPrerelease == false and
+            (.assets | all(.name != "filehop.apk" and .name != "android-release.json" and .name != "android-SHA256SUMS"))' "$RUNNER_TEMP/target-release.json" >/dev/null
+          gh api --paginate --slurp repos/nt1r/FileHop/releases > "$RUNNER_TEMP/releases.json"
+          jq -r '.[][] | select(.assets | any(.name == "filehop.apk")) | .tag_name' "$RUNNER_TEMP/releases.json" > "$RUNNER_TEMP/android-tags"
+          latest=$(sort -V "$RUNNER_TEMP/android-tags" | tail -1)
+          if [[ -n "$latest" ]]; then
+            [[ "$latest" != "$VERSION" ]]
+            [[ $(printf '%s\n%s\n' "$latest" "$VERSION" | sort -V | tail -1) == "$VERSION" ]]
+          fi
+          echo "RELEASE_SHA=$sha" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$code" >> "$GITHUB_ENV"
+          git checkout --detach "$sha"
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install official SDK without PR caches
+        run: |
+          echo '81a82aaea5abcc8ff68b3dfcb58b3c3c429378efd98e7433460610fecd7ae45f  android/gradle/wrapper/gradle-wrapper.jar' | sha256sum --check
+          bash scripts/setup-android-sdk.sh
+      - name: Check release source
+        working-directory: android
+        run: ./gradlew --no-daemon :app:testDebugUnitTest :app:lintRelease
+      - name: Build and verify stable signed APK
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.FILEHOP_ANDROID_KEYSTORE_BASE64 }}
+          FILEHOP_STORE_PASSWORD: ${{ secrets.FILEHOP_ANDROID_STORE_PASSWORD }}
+          FILEHOP_KEY_ALIAS: ${{ secrets.FILEHOP_ANDROID_KEY_ALIAS }}
+          FILEHOP_KEY_PASSWORD: ${{ secrets.FILEHOP_ANDROID_KEY_PASSWORD }}
+          EXPECTED_CERT: ${{ vars.FILEHOP_ANDROID_CERT_SHA256 }}
+          DEFAULT_ORIGIN: ${{ vars.FILEHOP_ANDROID_DEFAULT_ORIGIN }}
+        run: |
+          set -euo pipefail
+          : "${KEYSTORE_BASE64:?Missing signing key}"
+          : "${FILEHOP_STORE_PASSWORD:?Missing store password}"
+          : "${FILEHOP_KEY_ALIAS:?Missing key alias}"
+          : "${FILEHOP_KEY_PASSWORD:?Missing key password}"
+          [[ "$EXPECTED_CERT" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$DEFAULT_ORIGIN" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?/?$ ]]
+          [[ "$DEFAULT_ORIGIN" != *'.invalid'* ]]
+          umask 077
+          export FILEHOP_KEYSTORE=$(mktemp "$RUNNER_TEMP/filehop-signing.XXXXXX")
+          trap 'rm -f -- "$FILEHOP_KEYSTORE"' EXIT
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$FILEHOP_KEYSTORE"
+          unset KEYSTORE_BASE64
+          (cd android && ./gradlew --no-daemon :app:assembleRelease \
+            "-PfilehopVersionCode=$VERSION_CODE" "-PfilehopVersionName=${VERSION#v}" \
+            "-PfilehopDefaultOrigin=$DEFAULT_ORIGIN")
+          mkdir -p android-release-assets
+          cp android/app/build/outputs/apk/release/app-release.apk android-release-assets/filehop.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs android-release-assets/filehop.apk > "$RUNNER_TEMP/android-signature.txt"
+          actual=$(awk -F': ' '/^Signer #1 certificate SHA-256 digest:/ {print $2}' "$RUNNER_TEMP/android-signature.txt")
+          [[ "$actual" == "$EXPECTED_CERT" ]]
+          jq -n --arg version "$VERSION" --arg sha "$RELEASE_SHA" --arg cert "$actual" --argjson code "$VERSION_CODE" \
+            '{version:$version,sha:$sha,version_code:$code,application_id:"io.github.nt1r.filehop",certificate_sha256:$cert}' \
+            > android-release-assets/android-release.json
+          (cd android-release-assets && sha256sum filehop.apk android-release.json > android-SHA256SUMS)
+      - name: Attach APK to the existing release without replacing assets
+        run: |
+          gh release upload "$VERSION" --repo nt1r/FileHop android-release-assets/filehop.apk \
+            android-release-assets/android-release.json android-release-assets/android-SHA256SUMS

@@ -32,6 +32,8 @@ jobs:
       - name: Check and build development APK
         working-directory: android
         run: ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+      - name: Verify release build with a disposable synthetic signing key
+        run: bash tests/android_release_smoke.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: filehop-dev-${{ github.sha }}

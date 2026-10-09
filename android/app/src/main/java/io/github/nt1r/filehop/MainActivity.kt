@@ -189,7 +189,7 @@ private fun ColumnScope.Messages(screen: Screen, vm: HopViewModel) {
         Row {
             TextButton(onClick = { vm.resolve(query = true) }, enabled = !screen.sending) { Text("查询结果") }
             TextButton(onClick = { vm.resolve(query = false) }, enabled = !screen.sending) { Text("同次重试") }
-            TextButton(onClick = { abandon = true }) { Text("放弃确认") }
+            TextButton(onClick = { abandon = true }, enabled = !screen.sending) { Text("放弃确认") }
         }
     }
     OutlinedTextField(screen.draft, vm::draft, modifier = Modifier.fillMaxWidth(), label = { Text("消息正文") },
