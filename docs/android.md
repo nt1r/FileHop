@@ -4,9 +4,13 @@
 
 ## 工具链与构建
 
-首版以 Android 16（API 36）为最低及目标版本，不承诺旧系统兼容。使用 Kotlin 2.2.21、Compose、AGP 8.13.2、Gradle Wrapper 8.13、JDK 21（Java/Kotlin 字节码目标 17）；不依赖机器全局 Gradle 的版本。
+首版以 Android 16（API 36）为最低及目标版本，不承诺旧系统兼容。使用 Kotlin/Compose Compiler 2.4.21、Compose BOM 2026.09.00、AGP 9.4.1、Gradle Wrapper 9.8.1、JDK 27（Java/Kotlin 字节码目标仍为 17）；不依赖机器全局 Gradle 的版本。
 
-Android 检查在 GitHub 托管 `ubuntu-24.04` x86-64 runner 上使用官方 SDK Platform 36 / Build Tools 36.0.0。开发 VPS 不安装第三方 ARM64 SDK、ADB 或模拟执行层。本地能编辑源码和运行 Rust 隔离测试，不据此宣称 Android 编译通过。
+AGP 9 使用内置 Kotlin，根构建脚本显式选择较新的 KGP，不再应用 `org.jetbrains.kotlin.android`；编译选项使用 `kotlin.compilerOptions`。Compose 库统一由稳定版 BOM 管理，不单独混入 alpha/beta/RC。JUnit 保留当前坐标最新的 4.13.2，不为追求另一代版本号引入新的测试平台。直接依赖及 BOM 管理项分别核对 Google Maven/Maven Central，间接依赖按上游约束解析，不无差别强制覆盖。
+
+上游参考：[AGP 9.4 兼容要求](https://developer.android.com/build/releases/agp-9-4-0-release-notes)、[内置 Kotlin 迁移](https://developer.android.com/build/migrate-to-built-in-kotlin)、[KGP 版本覆盖](https://developer.android.com/build/releases/agp-9-0-0-release-notes#runtime-dependency-on-kotlin-gradle-plugin)、[Kotlin 兼容表](https://kotlinlang.org/docs/gradle-configure-project.html)、[Gradle 兼容表](https://docs.gradle.org/current/userguide/compatibility.html)。Kotlin 文档的“完全支持”版本表可能滞后于新稳定版；超出该表的组合不宣称已获上游全矩阵认证，须由当前提交的实际构建、Lint、测试和签名冒烟验证。
+
+Android 检查在 GitHub 托管 `ubuntu-24.04` x86-64 runner 上使用官方 Command-line Tools 23.0（16111833）、SDK Platform 37.2 / Build Tools 37.0.0。`compileSdk` 升到 37.2 只更新编译环境，不改变 `minSdk=36` 或 `targetSdk=36` 的设备范围及目标行为。开发 VPS 不安装第三方 ARM64 SDK、ADB 或模拟执行层。本地能编辑源码和运行 Rust 隔离测试，不据此宣称 Android 编译通过。
 
 `.github/workflows/android-check.yml` 在 PR 到 dev/main 或手动触发时运行：
 

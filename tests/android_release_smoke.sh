@@ -16,8 +16,8 @@ keytool -genkeypair -keystore "$FILEHOP_KEYSTORE" -alias "$FILEHOP_KEY_ALIAS" \
   -keyalg RSA -keysize 2048 -validity 2 -dname 'CN=Synthetic FileHop Test' -noprompt
 (cd "$root/android" && ./gradlew --no-daemon :app:lintRelease :app:assembleRelease -PfilehopVersionCode=2)
 apk="$root/android/app/build/outputs/apk/release/app-release.apk"
-"$ANDROID_HOME/build-tools/36.0.0/apksigner" verify "$apk"
-"$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" > "$temp/badging.txt"
+"$ANDROID_HOME/build-tools/37.0.0/apksigner" verify "$apk"
+"$ANDROID_HOME/build-tools/37.0.0/aapt" dump badging "$apk" > "$temp/badging.txt"
 grep -F "package: name='io.github.nt1r.filehop' versionCode='2'" "$temp/badging.txt" >/dev/null
 ! grep -q '^application-debuggable' "$temp/badging.txt"
 # Keystores are build inputs only, never APK assets.
