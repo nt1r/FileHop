@@ -29,11 +29,12 @@ FILEHOP_TEST_CHROME=1 bash tests/browser.sh
 当前开发切片支持隔离启动、显式初始化、安全登录恢复、退出及管理员撤销登录，以及文本发送／主动读取／复制、历史分页、未知发送恢复、前台增量同步和桌面多文件队列与附件交换闭环：
 
 - `web/`：Vite + React + TypeScript + Kumo standalone 样式，初始化状态页面、安全登录、受保护的消息工作区、同页重新登录及同源标签页退出通知。工作区支持多选追加、单个活动文件的页面内串行上传队列，以及附件下载。
-- `backend/`：Axum + Tokio + SQLx SQLite；显式 `init` / `reset-password` 管理命令、存储标识与账户迁移、`GET /api/status`、`POST /api/session`、`GET /api/session`、`DELETE /api/session`、`POST /api/messages`、最近页、before 历史分页及 after 增量分页 `GET /api/messages`、发送结果 `GET /api/sends/{send_id}`。
+- `backend/`：Axum + Tokio + SQLx SQLite；显式 `init` / `reset-password` 管理命令、存储标识与账户迁移、`GET /api/status`、Web `POST/GET/DELETE /api/session`、原生 `POST/GET/DELETE /api/native/session`、`POST /api/messages`、最近页、before 历史分页及 after 增量分页 `GET /api/messages`、发送结果 `GET /api/sends/{send_id}`。
+- `android/`：Kotlin + Compose 文本客户端，独立原生 Bearer 认证；工具链、官方 SDK 托管构建、安装及签名配置见 [Android 指南](android.md)。真实手机与正式签名验收状态以 Issue/PR 为准。
 - `deploy/`：开发应用 Compose、容器构建文件及共享 Caddy 站点示例。
 - `GET /internal/live` 仅返回 204，表示进程可响应；**不是数据库可用或业务就绪检查**。`GET /internal/ready` 区分数据库可用及恢复／上传就绪，详见下方内部检查说明；两者均不通过公网入口开放。
 
-状态查询仅返回 `uninitialized`、`initialized` 或 `storage_error`，禁止缓存且不泄露目录、账户或凭证。未初始化与存储异常不开放业务写入。文件多选串行队列、手动状态查询、本地中断、结束本轮与附件下载已实现；同页重新登录刷新有效限制，未知发送仍须手动查询或结束本轮，不自动重传，服务器文件页现提供列表、下载和应用文件额度，服务器删除协议及 Web 文件页单入口删除已实现，Android 及正式发布尚未实现；初始化成功不代表整个 Spec 001 已完成。GitHub 托管 CI 定义见 `.github/workflows/check.yml`，实际执行结果以对应提交的 Actions 检查为准。
+状态查询仅返回 `uninitialized`、`initialized` 或 `storage_error`，禁止缓存且不泄露目录、账户或凭证。未初始化与存储异常不开放业务写入。文件多选串行队列、手动状态查询、本地中断、结束本轮与附件下载已实现；同页重新登录刷新有效限制，未知发送仍须手动查询或结束本轮，不自动重传，服务器文件页现提供列表、下载和应用文件额度，服务器删除协议及 Web 文件页单入口删除已实现，Web 已正式自用，Android 文本客户端与原生认证随 Spec 005 交付，真机和正式签名验收尚未完成；初始化成功不代表整个 Spec 001 已完成。GitHub 托管 CI 定义见 `.github/workflows/check.yml`，实际执行结果以对应提交的 Actions 检查为准。
 
 ### 服务器文件列表与应用内导航
 
@@ -51,7 +52,7 @@ Web 仅服务器文件页提供删除确认，操作上下文由文件页持有�
 
 复验使用 `web/tests/deletion.ts` 的单入口、未知结果手动刷新、冲突拒绝和清理占用流程，以及 `web/tests/deletion-ordering.spec.ts` 的无删除轮询、删除后分页、迟到删除回调隔离与真实旧响应乱序流程。后者保留历史、发送结果和批量状态的旧响应，在较新删除完成快照到达后放行，验证不能恢复下载或重新插入列表；原自动单文件删除查询用例随轮询退役。`server-files.ts` 保留带草稿／上传队列／未确认发送的切页回归。稳定版桌面 Chrome 人工复验仍须在已授权的隔离实例上确认文件页指定文件及影响文案、保存副本不变、手动刷新后的清理和容量反馈；记录实际验收提交及结果，不将自动化 Chromium 当作人工通过。
 
-`DELETE /api/files/{file_id}` 需要有效 Cookie 与精确 Origin。实例内仍持有该文件读取句柄时返回 `409 FILE_IN_USE`，不排队；读取结束后必须主动重新请求。HEAD 只检查可用性，不启动流式读取。下载打开与删除接受共用短时准入裁决，已接受删除后新下载返回 `410 file_deleted`；断连、读盘错误及无进展期限结束后释放句柄，不跟踪浏览器最终落盘。
+`DELETE /api/files/{file_id}` 的 Web 路径需要有效 Cookie 与精确 Origin；原生路径校验独立 Bearer 的类型、摘要及到期时间，不强制 Web Origin，混合凭证拒绝。实例内仍持有该文件读取句柄时返回 `409 FILE_IN_USE`，不排队；读取结束后必须主动重新请求。HEAD 只检查可用性，不启动流式读取。下载打开与删除接受共用短时准入裁决，已接受删除后新下载返回 `410 file_deleted`；断连、读盘错误及无进展期限结束后释放句柄，不跟踪浏览器最终落盘。
 
 持久接受返回 202 及状态对象，已保存转待清理但总占用不变。重复删除中返回 202，已完成返回 200；未知标识返回 404。后台每轮最多处理 64 个删除，失败沿用 5–60 秒退避，轮转游标避免坏实体长期占住第一页。清理验证受管身份与可访问性，仅删除 UUID 对应实体，不跟随链接或递归删除异常目录；目录同步及条件事务完成后才释放额度。故障时保留删除中，重启继续。历史、发送标识和成功结果永久保留，重放返回当前状态，不重新上传。删除未知结果不得自动重发 DELETE，由用户手动刷新检查状态。
 
@@ -295,7 +296,7 @@ docker run --rm --network none --user "$FILEHOP_UID:$FILEHOP_GID" \
 
 成功退出 0 并输出 `Migration completed.`；不创建账户、不做文件恢复。缺库、缺身份、身份不一致、账户缺失、迁移历史缺失、checksum 不符、dirty 或未知版本均拒绝。后端、迁移、第二个迁移不能并发使用同一实例；进程退出释放锁，不需删除锁文件。密码重置也不能与迁移并发。空目录仅供显式 `init`，不能用迁移代替首次初始化。
 
-失败退出非零，stderr 给出错误及人工检查提示。停止后续更新、不启动旧后端写新结构，核对目标镜像和挂载、运行中的旧进程、权限／空间以及 `_sqlx_migrations` 实际记录；不要修改 checksum、删除身份文件、清库或自动重复运行。这里只实施迁移，不保证任何错误都能无条件事务回滚，不定义跨版本组合支持政策。仓库当前没有已发布旧迁移；改写过的开发版 `0001` 不会被自动修复。
+失败退出非零，stderr 给出错误及人工检查提示。停止后续更新、不启动旧后端写新结构，核对目标镜像和挂载、运行中的旧进程、权限／空间以及 `_sqlx_migrations` 实际记录；不要修改 checksum、删除身份文件、清库或自动重复运行。这里只实施迁移，不保证任何错误都能无条件事务回滚，不定义跨版本组合支持政策。v0.1.0 的 `0001` 已冻结；新增 `0002_add_native_sessions.sql` 保留 Web 会话并区分原生类型。`backend/tests/migration.rs` 用冻结初始迁移建立合成实例验证升级后的账户、文本及 Web 会话保留，不代表生产已升级。改写过的开发版 `0001` 不会被自动修复。
 
 迁移成功后用同一目标镜像和挂载启动后端，通过本机或受控内部网络访问：
 
