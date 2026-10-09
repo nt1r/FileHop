@@ -65,6 +65,7 @@ export async function verifyServerFiles(page: Page) {
   const oldListResponse = page.waitForResponse('**/api/files')
   releaseOldList()
   await oldListResponse
+  if (process.env.FILEHOP_DIAG_REQUESTS === '1') console.error('[DEBUG-filehop-query] old list released')
   await expect(listing.getByRole('button', { name: '刷新文件列表' })).toBeEnabled()
   await expect(row).toContainText('存储异常')
   await expect(row.getByRole('link', { name: '下载附件' })).toHaveCount(0)

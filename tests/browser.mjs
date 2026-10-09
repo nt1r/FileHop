@@ -15,7 +15,15 @@ while (Date.now() < deadline) {
 }
 if (!backend) throw new Error('Backend startup timed out')
 const root = resolve('web/dist')
+let diagnosticRequest = 0
 const server = createServer(async (request, response) => {
+  const diagnostic = process.env.FILEHOP_DIAG_REQUESTS === '1' && request.url === '/api/files/status-query'
+  const id = diagnostic ? ++diagnosticRequest : 0
+  if (diagnostic) {
+    console.error(`[DEBUG-filehop-query] ${id} proxy received`)
+    response.once('finish', () => console.error(`[DEBUG-filehop-query] ${id} proxy finished ${response.statusCode}`))
+    response.once('close', () => console.error(`[DEBUG-filehop-query] ${id} proxy closed`))
+  }
   try {
     if (request.url.startsWith('/api/')) {
       const headers = { ...request.headers }
@@ -28,6 +36,7 @@ const server = createServer(async (request, response) => {
         ...(['POST', 'PUT'].includes(request.method) ? { body: request, duplex: 'half' } : {}),
         signal: AbortSignal.timeout(transfer ? 31 * 60 * 1000 : 30000),
       })
+      if (diagnostic) console.error(`[DEBUG-filehop-query] ${id} upstream headers ${upstream.status}`)
       response.writeHead(upstream.status, Object.fromEntries(upstream.headers))
       if (upstream.body && request.method !== 'HEAD') Readable.fromWeb(upstream.body).pipe(response)
       else response.end()
