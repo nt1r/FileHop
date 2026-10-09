@@ -116,7 +116,15 @@ jobs:
         if: steps.scope.outputs.application == 'true'
         env:
           FILEHOP_DIAG_REQUESTS: '1'
-        run: bash tests/browser.sh
+        run: |
+          bash tests/browser.sh
+          # Temporary bounded diagnosis: fresh fixture each time, stop at the first failure.
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            for attempt in 1 2 3 4 5 6; do
+              echo "Isolated initialization diagnostic $attempt/6"
+              bash tests/browser.sh web/tests/initialization.spec.ts
+            done
+          fi
       # 仅保存一次性合成实例的浏览器失败证据，不读取部署目录或真实账户。
       # 保留请求时序，避免偶发失败后只能盲目重跑；不改变重试次数或验收断言。
       - name: Retain failed browser diagnostics
