@@ -4,7 +4,9 @@
 
 ## 工具链与构建
 
-首版以 Android 16（API 36）为最低及目标版本，不承诺旧系统兼容。使用 Kotlin/Compose Compiler 2.4.21、Compose BOM 2026.09.00、AGP 9.4.1、Gradle Wrapper 9.8.1、JDK 27（Java/Kotlin 字节码目标仍为 17）；不依赖机器全局 Gradle 的版本。
+首版以 Android 16（API 36）为最低及目标版本，不承诺旧系统兼容。使用 Kotlin/Compose Compiler 2.4.21、Compose BOM 2026.09.00、AGP 9.4.1、Gradle Wrapper 9.8.1、Amazon Corretto 25 LTS（Java/Kotlin 字节码目标仍为 17）；不依赖机器全局 Gradle 的版本。
+
+Java 发行版统一为 Amazon Corretto，选择仍受支持且与构建工具兼容的 LTS 支持线；Android 检查与正式发布使用相同发行版及版本选择配置。本地开发也使用相同发行版和 LTS 支持线。当前 `setup-java` 的 Corretto 适配器仅支持大版本选择，因此配置 `25` 和 `check-latest: true`：每次查询上游补丁版本，不是精确补丁锁定，不保证不同日期运行的补丁号相同。实际解析版本以 CI 安装日志为准；如需严格复现补丁版本，应改用固定官方归档并校验摘要。升级 LTS 主版本需显式修改配置并重新验证，不自动切换到非 LTS 最新版。
 
 AGP 9 使用内置 Kotlin，根构建脚本显式选择较新的 KGP，不再应用 `org.jetbrains.kotlin.android`；编译选项使用 `kotlin.compilerOptions`。Compose 库统一由稳定版 BOM 管理，不单独混入 alpha/beta/RC。JUnit 保留当前坐标最新的 4.13.2，不为追求另一代版本号引入新的测试平台。直接依赖及 BOM 管理项分别核对 Google Maven/Maven Central，间接依赖按上游约束解析，不无差别强制覆盖。
 

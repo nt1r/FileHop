@@ -59,8 +59,9 @@ jobs:
           git checkout --detach "$sha"
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
-          distribution: temurin
-          java-version: '27'
+          distribution: corretto
+          java-version: '25'
+          check-latest: true
       - name: Install official SDK without PR caches
         run: |
           echo '3b8a25775a69158b5ad2b1d17a80a88dc7b40a352a73eb27d06c612a7ce68e98  android/gradle/wrapper/gradle-wrapper.jar' | sha256sum --check
