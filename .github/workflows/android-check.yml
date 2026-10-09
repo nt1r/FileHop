@@ -23,12 +23,12 @@ jobs:
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
       - name: Verify wrapper and install official SDK packages
         shell: bash
         run: |
           echo '81a82aaea5abcc8ff68b3dfcb58b3c3c429378efd98e7433460610fecd7ae45f  android/gradle/wrapper/gradle-wrapper.jar' | sha256sum --check
-          sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+          bash scripts/setup-android-sdk.sh
       - name: Check and build development APK
         working-directory: android
         run: ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug

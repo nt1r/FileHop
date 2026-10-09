@@ -4,7 +4,7 @@
 
 ## 工具链与构建
 
-首版以 Android 16（API 36）为最低及目标版本，不承诺旧系统兼容。使用 Kotlin 2.2.21、Compose、AGP 8.13.2、Gradle Wrapper 8.13、JDK 17；不依赖机器全局 Gradle 的版本。
+首版以 Android 16（API 36）为最低及目标版本，不承诺旧系统兼容。使用 Kotlin 2.2.21、Compose、AGP 8.13.2、Gradle Wrapper 8.13、JDK 21（Java/Kotlin 字节码目标 17）；不依赖机器全局 Gradle 的版本。
 
 Android 检查在 GitHub 托管 `ubuntu-24.04` x86-64 runner 上使用官方 SDK Platform 36 / Build Tools 36.0.0。开发 VPS 不安装第三方 ARM64 SDK、ADB 或模拟执行层。本地能编辑源码和运行 Rust 隔离测试，不据此宣称 Android 编译通过。
 
