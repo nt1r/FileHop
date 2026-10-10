@@ -1,0 +1,61 @@
+/* Kumo owns the base palette and component states. FileHop adds only application roles.
+   Light theme only; do not override Kumo tokens to recolor individual components. */
+:root {
+  color-scheme: light;
+
+  --fh-accent-tint: var(--color-kumo-info-tint);
+  --fh-accent-hover: color-mix(in oklab, var(--color-kumo-brand) 12%, var(--color-kumo-base));
+  --fh-accent-line: color-mix(in oklab, var(--color-kumo-brand) 30%, var(--color-kumo-base));
+  --fh-focus-ring: color-mix(in oklab, var(--color-kumo-brand) 25%, transparent);
+  --fh-danger-line: color-mix(in oklab, var(--color-kumo-danger) 30%, var(--color-kumo-base));
+  --fh-warning-line: color-mix(in oklab, var(--color-kumo-warning) 35%, var(--color-kumo-base));
+  --fh-brand-gradient: linear-gradient(135deg, var(--color-kumo-brand), var(--color-kumo-brand-hover));
+
+  /* Storage categories are not success/warning/error states. */
+  --fh-storage-saved: var(--color-kumo-brand);
+  --fh-storage-reserved: var(--color-kumo-badge-orange);
+  --fh-storage-cleaning: var(--color-kumo-badge-purple);
+
+  /* File classification, independent of status feedback. */
+  --fh-file-pdf: var(--color-kumo-badge-red);
+  --fh-file-word: var(--color-kumo-badge-blue);
+  --fh-file-excel: var(--color-kumo-badge-green);
+  --fh-file-image: var(--color-kumo-badge-teal);
+  --fh-file-archive: var(--color-kumo-badge-neutral);
+  --fh-file-video: var(--color-kumo-badge-purple);
+  --fh-file-generic: var(--color-kumo-badge-neutral);
+}
+
+/* A source label is a visual hint, not a device identity. The same mapping is
+   used by avatars, source tags and bubbles. Derived values live on each element
+   so nested avatars resolve their own accent rather than an ancestor's value. */
+[data-source-color] {
+  --fh-source-accent: var(--color-kumo-badge-blue);
+  --fh-source-strong: color-mix(in oklab, var(--fh-source-accent) 75%, var(--color-kumo-contrast));
+  --fh-source-surface: color-mix(in oklab, var(--fh-source-accent) 5%, var(--color-kumo-base));
+  --fh-source-tint: color-mix(in oklab, var(--fh-source-accent) 10%, var(--color-kumo-base));
+  --fh-source-line: color-mix(in oklab, var(--fh-source-accent) 25%, var(--color-kumo-base));
+}
+
+[data-source-color="purple"] { --fh-source-accent: var(--color-kumo-badge-purple); }
+[data-source-color="teal"] { --fh-source-accent: var(--color-kumo-badge-teal); }
+[data-source-color="green"] { --fh-source-accent: var(--color-kumo-badge-green); }
+[data-source-color="orange"] {
+  --fh-source-accent: var(--color-kumo-badge-orange);
+  /* Kumo’s orange badge is bright; deepen it for small text and white initials. */
+  --fh-source-strong: color-mix(in oklab, var(--fh-source-accent) 60%, var(--color-kumo-contrast));
+}
+[data-source-color="red"] { --fh-source-accent: var(--color-kumo-badge-red); }
+
+.file-badge {
+  --fh-file-accent: var(--fh-file-generic);
+  --fh-file-tint: color-mix(in oklab, var(--fh-file-accent) 12%, var(--color-kumo-base));
+  --fh-file-ink: color-mix(in oklab, var(--fh-file-accent) 70%, var(--color-kumo-contrast));
+}
+
+.file-badge-pdf { --fh-file-accent: var(--fh-file-pdf); }
+.file-badge-word { --fh-file-accent: var(--fh-file-word); }
+.file-badge-excel { --fh-file-accent: var(--fh-file-excel); }
+.file-badge-image { --fh-file-accent: var(--fh-file-image); }
+.file-badge-archive { --fh-file-accent: var(--fh-file-archive); }
+.file-badge-video { --fh-file-accent: var(--fh-file-video); }

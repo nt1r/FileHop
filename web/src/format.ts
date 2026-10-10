@@ -51,43 +51,10 @@ export function getFileCategory(filename: string): FileCategory {
   return 'other'
 }
 
-export const AVATAR_COLORS: string[] = [
-  '#2563eb', // Royal Blue
-  '#7c3aed', // Violet
-  '#059669', // Emerald
-  '#b45309', // Amber
-  '#dc2626', // Red
-  '#0891b2', // Cyan
-  '#9333ea', // Purple
-  '#c2410c', // Orange
-  '#4f46e5', // Indigo
-  '#0f766e', // Teal
-  '#be185d', // Pink
-  '#475569', // Slate
-  '#a16207', // Warm Amber
-  '#a21caf', // Fuchsia
-  '#0369a1', // Sky
-  '#15803d', // Green
-  '#be123c', // Rose
-  '#4338ca', // Deep Indigo
-  '#0e7490', // Deep Cyan
-  '#6d28d9', // Deep Violet
-]
-
 export function getAvatarInitial(label?: string): string {
   if (!label) return '我'
   const clean = label.replace(/^[\s\u0085\u3000\u200b\ufeff]+/, '').trim()
   if (!clean) return '我'
   const first = [...clean][0]
   return first ? first.toUpperCase() : '我'
-}
-
-export function getAvatarColor(label?: string): { bg: string; text: string } {
-  const clean = label?.trim() || '我'
-  let hash = 0
-  for (let i = 0; i < clean.length; i++) {
-    hash = (hash * 31 + clean.charCodeAt(i)) >>> 0
-  }
-  const bg = AVATAR_COLORS[hash % AVATAR_COLORS.length]
-  return { bg, text: '#ffffff' }
 }

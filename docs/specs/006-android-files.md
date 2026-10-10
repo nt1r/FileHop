@@ -1,6 +1,6 @@
 # Spec 006：Android 文件交换
 
-状态：单人自用的范围概要，待实现；文件语义同步 [Spec 007](007-implemented-flow-simplification.md) 的精简目标。先完成 Android 文本闭环，再实现最小文件交换；尚未创建实施 Issue。
+状态：单人自用的范围概要，待实现；先完成 Android 文本闭环，阶段状态见[路线图](../roadmap.md#android)。文件发送语义以 [Spec 002](002-desktop-file-transfer.md) 为准。
 
 关联：[产品基线](../product.md) · [Spec 002](002-desktop-file-transfer.md) · [Spec 003](003-server-file-management.md) · [Spec 005](005-android-text-loop.md)。本文件是本切片唯一权威来源。
 

@@ -4,7 +4,8 @@ import {
   FileTextIcon,
   FileVideoIcon,
 } from '@phosphor-icons/react'
-import { getAvatarColor, getAvatarInitial } from './format'
+import { getAvatarInitial } from './format'
+import { getSourceColor } from './sourceColor'
 
 export function UserAvatar({
   label = '我',
@@ -16,19 +17,17 @@ export function UserAvatar({
   className?: string
 }) {
   const initial = getAvatarInitial(label)
-  const { bg, text } = getAvatarColor(label)
   const fontSize = Math.max(12, Math.round(size * 0.44))
 
   return (
     <div
       className={`user-avatar-circle ${className}`}
+      data-source-color={getSourceColor(label)}
       style={{
         width: size,
         height: size,
         minWidth: size,
         minHeight: size,
-        backgroundColor: bg,
-        color: text,
         fontSize: `${fontSize}px`,
       }}
       aria-hidden="true"

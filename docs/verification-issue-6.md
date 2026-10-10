@@ -1,5 +1,7 @@
 # Issue #6：隔离启动与显式初始化验证
 
+> 历史归档：仅记录 Issue #6 当时的环境、命令和复审结果，正文按原记录保留，不代表当前能力或待办。日常操作见[开发指南](development.md)，当前验证入口见[验证指南](verification.md)。不继续向本文追加进度或当前验收结论。
+
 范围：[Issue #6](https://github.com/nt1r/FileHop/issues/6)、Spec 001 A01 及 A16/A17 的相关隔离配置部分。不是整个阶段或真实公网验收。
 
 ## 实现与测试 seam

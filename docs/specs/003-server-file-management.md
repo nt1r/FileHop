@@ -1,6 +1,6 @@
 # Spec 003：服务器文件管理与删除
 
-状态：原桌面能力已实现，旧版验收见 Issue #60 / PR #73；[Spec 007](007-implemented-flow-simplification.md) A 单入口删除与手动刷新已实现，新增交互仍需稳定版桌面 Chrome 人工确认。原生认证随 Spec 005 补验；旧证据不代表新交互已通过。
+状态：已确认。实施及验证状态见[路线图](../roadmap.md#已有能力)，后续交互精简见[流程精简](../roadmap.md#流程精简)。
 
 本文件为该切片的唯一 Spec；[实施主 Issue #52](https://github.com/nt1r/FileHop/issues/52) 跟踪实施、依赖和验收证据，不复制或替代本文件。
 

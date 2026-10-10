@@ -1,6 +1,6 @@
 # Spec 005：Android 认证与文本
 
-状态：范围已确认，实施中；[实施主 Issue #99](https://github.com/nt1r/FileHop/issues/99) 跟踪实现与验证。Web 正式自用前置已完成；工具链与安装说明见 [Android 指南](../android.md)，构建通过不代表手机验收完成。
+状态：范围已确认。[实施主 Issue #99](https://github.com/nt1r/FileHop/issues/99) 跟踪实现与验证，阶段状态见[路线图](../roadmap.md#android)；工具链与安装见 [Android 指南](../android.md)。
 
 关联：[产品基线](../product.md) · [路线图](../roadmap.md) · [Spec 001](001-desktop-text-loop.md) · [Spec 004](004-web-production-deployment.md) · [Spec 006](006-android-files.md)。本文件是本切片唯一权威来源，实施 Issue 只引用范围和验证编号，不重复维护完整需求。
 
@@ -96,9 +96,3 @@
 - 多系统版本/厂商验收矩阵、额外屏幕隐私锁、旧客户端兼容层。
 - 原生登录响应丢失的专项恢复协议、退出撤销失败后的凭证保留和重试机制。这些罕见异常不提前设计或建立专项测试，实际发生后再处理；现有基本错误反馈和安全约束不撤销。
 - 为完整验收表、状态机或未来扩展提前拆实施子票和建设测试平台。
-
-## 7. Further Notes
-
-本切片按“单人自用、先用起来”交付。当前没有必须继续提问的需求问题；开工时确定实际手机与工具链，不公开设备细节。
-
-仍先完成 Web 正式自用，再实施 Android 文本闭环。实施 Issue 的就绪标签不表示已实现，也不授权自动推进部署、修改共享入口或仓库设置。需求以本文为准，进度和简短验证结果记录在实施 Issue。
