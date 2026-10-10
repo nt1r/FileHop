@@ -20,23 +20,7 @@ import { type useFiles } from './files'
 import { formatBytes, formatMessageDate, formatMessageTime } from './format'
 import { FileTypeBadge, UserAvatar } from './ui'
 import UploadTasks from './UploadTasks'
-
-const DEVICE_PALETTES = [
-  { text: '#0284c7', bg: '#f0f9ff', border: '#bae6fd', badgeBg: '#e0f2fe' },
-  { text: '#b45309', bg: '#fffbeb', border: '#fde68a', badgeBg: '#fef3c7' },
-  { text: '#7c3aed', bg: '#faf5ff', border: '#e9d5ff', badgeBg: '#f3e8ff' },
-  { text: '#0f766e', bg: '#f0fdfa', border: '#99f6e4', badgeBg: '#ccfbf1' },
-  { text: '#be123c', bg: '#fff1f2', border: '#fecdd3', badgeBg: '#ffe4e6' },
-  { text: '#c2410c', bg: '#fff7ed', border: '#fed7aa', badgeBg: '#ffedd5' },
-  { text: '#4338ca', bg: '#eef2ff', border: '#c7d2fe', badgeBg: '#e0e7ff' },
-  { text: '#0e7490', bg: '#ecfeff', border: '#a5f3fc', badgeBg: '#cffafe' },
-]
-
-function getDevicePalette(source: string) {
-  let hash = 0
-  for (let i = 0; i < source.length; i++) hash = (hash * 31 + source.charCodeAt(i)) >>> 0
-  return DEVICE_PALETTES[hash % DEVICE_PALETTES.length]
-}
+import { getSourceColor } from './sourceColor'
 
 export default function Messages({ exchange, files }: { exchange: ReturnType<typeof useMessages>; files: ReturnType<typeof useFiles> }) {
   const { model, label } = exchange
@@ -177,12 +161,12 @@ export default function Messages({ exchange, files }: { exchange: ReturnType<typ
 
         {model.messages.map(message => {
           const isSelf = message.source_label === label
-          const palette = isSelf ? null : getDevicePalette(message.source_label)
 
           return (
             <article
               key={message.id}
               data-message-id={message.id}
+              data-source-color={getSourceColor(message.source_label)}
               className={`message chat-message-row ${isSelf ? 'chat-row-self' : 'chat-row-other'}`}
             >
               {!isSelf && (
@@ -194,10 +178,7 @@ export default function Messages({ exchange, files }: { exchange: ReturnType<typ
               <div className="chat-bubble-container">
                 {!isSelf && (
                   <header className="chat-bubble-header">
-                    <div
-                      className="chat-device-tag"
-                      style={palette ? { color: palette.text, borderColor: palette.border, backgroundColor: palette.badgeBg } : undefined}
-                    >
+                    <div className="chat-device-tag">
                       <DesktopIcon size={12} className="chat-device-icon" />
                       <span className="message-source-label">{message.source_label}</span>
                     </div>
@@ -206,7 +187,6 @@ export default function Messages({ exchange, files }: { exchange: ReturnType<typ
 
                 <div
                   className={`chat-bubble-body ${isSelf ? 'bubble-self' : 'bubble-other'} ${message.kind === 'FILE' ? 'bubble-file-card' : ''}`}
-                  style={!isSelf && palette && message.kind === 'TEXT' ? { backgroundColor: palette.bg, borderColor: palette.border } : undefined}
                 >
                   {message.kind === 'TEXT' ? (
                     <div className="message-body text-message">
