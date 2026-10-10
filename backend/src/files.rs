@@ -1,4 +1,6 @@
-use crate::session::{Service, authenticate, error, unavailable, write_origin_allowed};
+use crate::session::{
+    Service, authenticate, business_origin_allowed as write_origin_allowed, error, unavailable,
+};
 use axum::{
     Json,
     body::{Body, to_bytes},

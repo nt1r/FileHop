@@ -4,7 +4,7 @@
 
 FileHop 希望让桌面浏览器与 Android 手机通过自己的服务器共享一条私人消息流，方便传递文字、链接、命令片段和文件，无需选择接收设备。
 
-> **桌面文本、文件传输和服务器文件管理已实现；正式发布部署及 Android 尚未完成。** 项目按单人自用精简：先正式用起来，再补自己的手机客户端，低风险体验问题遇到再修。已有证据和剩余限制见[路线图](docs/roadmap.md)。
+> **桌面 Web 已正式自用；Android 文本客户端正在交付，真机及正式签名验收尚未完成。** Android 文件功能不在当前切片内。已有证据和剩余限制见[路线图](docs/roadmap.md)。
 
 ## 产品方向
 
@@ -35,7 +35,7 @@ FileHop 用于临时交换文本与文件，不是网盘、目录同步工具或
 | 后端 | Rust、Axum、Tokio |
 | 数据库 | SQLite、SQLx |
 | 运行与入口 | Docker Compose、Caddy |
-| Android（待实现） | Kotlin、Jetpack Compose |
+| Android | Kotlin、Jetpack Compose |
 
 ## 参与开发
 
@@ -44,6 +44,7 @@ FileHop 用于临时交换文本与文件，不是网盘、目录同步工具或
 - [贡献指南](CONTRIBUTING.md)：分支与 PR 流程。
 - [开发指南](docs/development.md)：工具链、构建、测试及隔离开发环境运行。
 - [测试原则](docs/testing.md)：测试与验收要求。
+- [Android 指南](docs/android.md)：官方 SDK 托管构建、开发 APK、正式签名和安装更新。
 
 运行配置与隔离冒烟不等于已完成正式生产部署；实际接入与更新仍须核对版本、数据挂载和操作授权。
 

@@ -29,11 +29,12 @@ FILEHOP_TEST_CHROME=1 bash tests/browser.sh
 当前开发切片支持隔离启动、显式初始化、安全登录恢复、退出及管理员撤销登录，以及文本发送／主动读取／复制、历史分页、未知发送恢复、前台增量同步和桌面多文件队列与附件交换闭环：
 
 - `web/`：Vite + React + TypeScript + Kumo standalone 样式，初始化状态页面、安全登录、受保护的消息工作区、同页重新登录及同源标签页退出通知。工作区支持多选追加、单个活动文件的页面内串行上传队列，以及附件下载。
-- `backend/`：Axum + Tokio + SQLx SQLite；显式 `init` / `reset-password` 管理命令、存储标识与账户迁移、`GET /api/status`、`POST /api/session`、`GET /api/session`、`DELETE /api/session`、`POST /api/messages`、最近页、before 历史分页及 after 增量分页 `GET /api/messages`、发送结果 `GET /api/sends/{send_id}`。
+- `backend/`：Axum + Tokio + SQLx SQLite；显式 `init` / `reset-password` 管理命令、存储标识与账户迁移、`GET /api/status`、Web `POST/GET/DELETE /api/session`、原生 `POST/GET/DELETE /api/native/session`、`POST /api/messages`、最近页、before 历史分页及 after 增量分页 `GET /api/messages`、发送结果 `GET /api/sends/{send_id}`。
+- `android/`：Kotlin + Compose 文本客户端，独立原生 Bearer 认证；工具链、官方 SDK 托管构建、安装及签名配置见 [Android 指南](android.md)。真实手机与正式签名验收状态以 Issue/PR 为准。
 - `deploy/`：开发应用 Compose、容器构建文件及共享 Caddy 站点示例。
 - `GET /internal/live` 仅返回 204，表示进程可响应；**不是数据库可用或业务就绪检查**。`GET /internal/ready` 区分数据库可用及恢复／上传就绪，详见下方内部检查说明；两者均不通过公网入口开放。
 
-状态查询仅返回 `uninitialized`、`initialized` 或 `storage_error`，禁止缓存且不泄露目录、账户或凭证。未初始化与存储异常不开放业务写入。文件多选串行队列、手动状态查询、本地中断、结束本轮与附件下载已实现；同页重新登录刷新有效限制，未知发送仍须手动查询或结束本轮，不自动重传，服务器文件页现提供列表、下载和应用文件额度，服务器删除协议及 Web 文件页单入口删除已实现，Android 及正式发布尚未实现；初始化成功不代表整个 Spec 001 已完成。GitHub 托管 CI 定义见 `.github/workflows/check.yml`，实际执行结果以对应提交的 Actions 检查为准。
+状态查询仅返回 `uninitialized`、`initialized` 或 `storage_error`，禁止缓存且不泄露目录、账户或凭证。未初始化与存储异常不开放业务写入。文件多选串行队列、手动状态查询、本地中断、结束本轮与附件下载已实现；同页重新登录刷新有效限制，未知发送仍须手动查询或结束本轮，不自动重传，服务器文件页现提供列表、下载和应用文件额度，服务器删除协议及 Web 文件页单入口删除已实现，Web 已正式自用，Android 文本客户端与原生认证随 Spec 005 交付，真机和正式签名验收尚未完成；初始化成功不代表整个 Spec 001 已完成。GitHub 托管 CI 定义见 `.github/workflows/check.yml`，实际执行结果以对应提交的 Actions 检查为准。
 
 ### 服务器文件列表与应用内导航
 
@@ -49,15 +50,15 @@ FILEHOP_TEST_CHROME=1 bash tests/browser.sh
 
 Web 仅服务器文件页提供删除确认，操作上下文由文件页持有。请求未接受前显示请求处理中，接受后显示“删除处理中，空间尚未释放”，提示手动刷新列表和用量；响应只更新请求反馈，不自动查询进度、刷新容量或联动消息。手动刷新／重入取得完成快照后从文件页移除，历史保留“服务器文件已删除”。未知结果提示手动刷新、不自动查询或重发 DELETE；刷新仍为可用不证明原请求不会迟到执行，当前文件页保留警告和下载阻挡，再次删除须确认。FILE_IN_USE 结束本次流程，不排队删除。切页、认证失效及退出均丢弃删除上下文，旧回调不更新新界面；重入只读取当前快照。消息状态允许暂时滞后，实际下载由服务器裁决。手动读取遵守 Retry-After，容量使用独立快照，不乐观扣减。
 
-复验使用 `web/tests/deletion.ts` 的单入口、未知结果手动刷新、冲突拒绝和清理占用流程，以及 `web/tests/deletion-ordering.spec.ts` 的无删除轮询、删除后分页、迟到删除回调隔离与真实旧响应乱序流程。后者保留历史、发送结果和批量状态的旧响应，在较新删除完成快照到达后放行，验证不能恢复下载或重新插入列表；原自动单文件删除查询用例随轮询退役。`server-files.ts` 保留带草稿／上传队列／未确认发送的切页回归。稳定版桌面 Chrome 人工复验仍须在已授权的隔离实例上确认文件页指定文件及影响文案、保存副本不变、手动刷新后的清理和容量反馈；记录实际验收提交及结果，不将自动化 Chromium 当作人工通过。
+复验使用 `web/tests/deletion.ts` 的单入口、未知结果手动刷新、冲突拒绝和清理占用流程，以及 `web/tests/deletion-ordering.spec.ts` 的无删除轮询、删除后分页、迟到删除回调隔离与真实旧响应乱序流程。后者保留历史、发送结果和批量状态的旧响应，在较新删除完成快照到达后放行，验证不能恢复下载或重新插入列表；原自动单文件删除查询用例随轮询退役。`server-files.ts` 保留带草稿／上传队列／未确认发送的切页回归。`server-files.spec.ts` 在独立临时实例中编排它与 `deletion.ts`，不继承初始化大流程中中断上传留下的合法预留；所有原有状态、容量与删除断言保留。可单独运行 `bash tests/browser.sh web/tests/server-files.spec.ts`。浏览器失败时，回环代理最多输出最近 32 条状态查询阶段事件（不含凭证、文件标识或请求体），配合失败 trace 区分请求是否到达代理及是否已返回。稳定版桌面 Chrome 人工复验仍须在已授权的隔离实例上确认文件页指定文件及影响文案、保存副本不变、手动刷新后的清理和容量反馈；记录实际验收提交及结果，不将自动化 Chromium 当作人工通过。
 
-`DELETE /api/files/{file_id}` 需要有效 Cookie 与精确 Origin。实例内仍持有该文件读取句柄时返回 `409 FILE_IN_USE`，不排队；读取结束后必须主动重新请求。HEAD 只检查可用性，不启动流式读取。下载打开与删除接受共用短时准入裁决，已接受删除后新下载返回 `410 file_deleted`；断连、读盘错误及无进展期限结束后释放句柄，不跟踪浏览器最终落盘。
+`DELETE /api/files/{file_id}` 的 Web 路径需要有效 Cookie 与精确 Origin；原生路径校验独立 Bearer 的类型、摘要及到期时间，不强制 Web Origin，混合凭证拒绝。实例内仍持有该文件读取句柄时返回 `409 FILE_IN_USE`，不排队；读取结束后必须主动重新请求。HEAD 只检查可用性，不启动流式读取。下载打开与删除接受共用短时准入裁决，已接受删除后新下载返回 `410 file_deleted`；断连、读盘错误及无进展期限结束后释放句柄，不跟踪浏览器最终落盘。
 
 持久接受返回 202 及状态对象，已保存转待清理但总占用不变。重复删除中返回 202，已完成返回 200；未知标识返回 404。后台每轮最多处理 64 个删除，失败沿用 5–60 秒退避，轮转游标避免坏实体长期占住第一页。清理验证受管身份与可访问性，仅删除 UUID 对应实体，不跟随链接或递归删除异常目录；目录同步及条件事务完成后才释放额度。故障时保留删除中，重启继续。历史、发送标识和成功结果永久保留，重放返回当前状态，不重新上传。删除未知结果不得自动重发 DELETE，由用户手动刷新检查状态。
 
 正常启动已初始化实例时在恢复前排他锁定两个既有存储身份文件，避免第二个后端绕过进程内读取裁决；嵌入式 Router 的调用者须自行保证同一存储只有一个应用实例。测试使用真实隔离 SQLite、文件目录及回环 HTTP；`files_process.rs` 覆盖下载竞争、断连、重复进程拒绝和删除持久化边界 SIGKILL，`files_failure.rs` 覆盖清理故障与上传准入。这些后端验证不替代 Web 确认界面、生产部署或原生认证验收。
 
-状态字段同样整理在尚未冻结的 `0001_next_release.sql` 中；独立 `migrate` 不提供已改写旧开发迁移的兼容转换，不得用清库或重写 checksum 宣称升级成功。历史 checksum 不符且需保留数据的实例不能直接更新。测试仅初始化新的隔离合成实例，未操作任何既有数据目录。
+状态字段在首次发布前整理进 `0001_next_release.sql`，该文件现已随 v0.1.0 冻结；独立 `migrate` 不提供已改写旧开发迁移的兼容转换，不得用清库或重写 checksum 宣称升级成功。历史 checksum 不符且需保留数据的实例不能直接更新。测试仅初始化新的隔离合成实例，未操作任何既有数据目录。
 
 ### 服务器文件管理复验入口
 
@@ -76,6 +77,17 @@ Web 仅服务器文件页提供删除确认，操作上下文由文件页持有�
 下载资源参数见下方单文件后端配置；`files.rs` 验证有界下载槽位及无进展超时，`files_process.rs` 的显式 `bounded_memory` 测试比较不同文件大小和并发的进程内存。清理退避及恢复见上方删除协议与 `files_failure.rs`／`files_process.rs`；这些隔离测试不验证生产磁盘或共享代理预算。人工复验须补充最新稳定版桌面 Chrome 的真实后端列表／分页、下载、确认文案、清理与容量反馈、导航和认证恢复，并私下保存实际运行版本与环境信息。最终验收版本不明或任一适用项目缺证时保持待验收，不宣告完整阶段 2 完成。
 
 ## 工具链与本地检查
+
+### 版本维护规则
+
+- 有 LTS 支持线的基础运行时（Java、Node）和 CI 操作系统优先采用仍受支持、与工具链兼容的 LTS；不自动追随最新大版本。Java 统一使用 Amazon Corretto，当前选择与补丁解析限制见 [Android 指南](android.md#工具链与构建)。
+- Rust、Gradle、AGP、Kotlin、pnpm 等不统一套用 LTS 要求；选择兼容的正式稳定版，排除 alpha、beta、RC。安全补丁及时评估更新，固定版本不代表长期停止维护。
+- 检查与发布采用相同的核心工具链版本配置，同名 Actions 统一版本并固定完整 commit SHA，旁注对应 release tag；升级须审阅上游兼容性和默认行为变化。Action 自带的 Node 运行时不同于项目的 Node 版本。
+- 核心工具尽量固定具体版本，应用依赖提交锁文件；下载的 SDK、Gradle、Caddy 等归档校验摘要。Corretto 大版本选择、runner 自带工具、未指定工具版本的 Buildx/BuildKit 和未固定 digest 的容器标签是明确的浮动项，不能据此宣称整个 CI 完全可复现。
+- GitHub 托管 runner 固定 Ubuntu LTS 系列（当前 `ubuntu-24.04` / `ubuntu-24.04-arm`），不使用 `ubuntu-latest`；这不锁定 runner 镜像补丁或预装工具。辅助工具先保留托管版本，出现实际兼容或复现问题再单独固定，不建立全工具版本矩阵。
+- 工具链与 Actions 更新通过显式提交及相应 CI 验证；涉及依赖、镜像或环境的更新按[测试规范](testing.md)执行完整检查。正式发布不消费 PR 缓存或特权产物；`setup-node` 显式关闭自动包管理器缓存，普通检查的 pnpm 缓存仍由独立步骤管理。执行结果留在 Issue/PR 与 CI 日志，不在本文维护临时通过清单。
+
+### 本地检查
 
 测试使用 Rust / Playwright / Bash，见[测试规范](testing.md)，不需要 Python。Bash 在 Linux 宿主机或 CI runner 上编排，需具备 Node、Cargo、Docker、curl 及标准 GNU 工具；不要求应用镜像提供这些宿主工具。
 
@@ -295,7 +307,7 @@ docker run --rm --network none --user "$FILEHOP_UID:$FILEHOP_GID" \
 
 成功退出 0 并输出 `Migration completed.`；不创建账户、不做文件恢复。缺库、缺身份、身份不一致、账户缺失、迁移历史缺失、checksum 不符、dirty 或未知版本均拒绝。后端、迁移、第二个迁移不能并发使用同一实例；进程退出释放锁，不需删除锁文件。密码重置也不能与迁移并发。空目录仅供显式 `init`，不能用迁移代替首次初始化。
 
-失败退出非零，stderr 给出错误及人工检查提示。停止后续更新、不启动旧后端写新结构，核对目标镜像和挂载、运行中的旧进程、权限／空间以及 `_sqlx_migrations` 实际记录；不要修改 checksum、删除身份文件、清库或自动重复运行。这里只实施迁移，不保证任何错误都能无条件事务回滚，不定义跨版本组合支持政策。仓库当前没有已发布旧迁移；改写过的开发版 `0001` 不会被自动修复。
+失败退出非零，stderr 给出错误及人工检查提示。停止后续更新、不启动旧后端写新结构，核对目标镜像和挂载、运行中的旧进程、权限／空间以及 `_sqlx_migrations` 实际记录；不要修改 checksum、删除身份文件、清库或自动重复运行。这里只实施迁移，不保证任何错误都能无条件事务回滚，不定义跨版本组合支持政策。v0.1.0 的 `0001` 已冻结；新增 `0002_next_release.sql` 保留 Web 会话并区分原生类型；后续迁移继续递增编号并保留 `_next_release.sql` 后缀，发布时不改名。`backend/tests/migration.rs` 用冻结初始迁移建立合成实例验证升级后的账户、文本及 Web 会话保留，不代表生产已升级。改写过的开发版 `0001` 不会被自动修复。
 
 迁移成功后用同一目标镜像和挂载启动后端，通过本机或受控内部网络访问：
 
@@ -353,7 +365,7 @@ Argon2id 使用 v0.6 默认参数 m=19456 KiB、t=2、p=1，双验证算法内�
 cargo test --release --manifest-path backend/Cargo.toml --test session_process measure_login_budget -- --ignored --nocapture
 ```
 
-本轮整理尚未进入 main 的 `0001_next_release.sql`，加入会话存储。旧开发实例不会自动迁移；独立 `migrate` 也不会绕过旧 checksum，已有需保留的数据不得通过重新 init 处理。可丢弃开发实例也须由操作者明确授权并核对两个目录后再重建，本任务未清理任何既有实例。
+会话存储在首次发布前加入 `0001_next_release.sql`；该迁移现已冻结，后续结构变更使用新的递增编号文件。旧开发实例不会自动迁移；独立 `migrate` 也不会绕过旧 checksum，已有需保留的数据不得通过重新 init 处理。可丢弃开发实例也须由操作者明确授权并核对两个目录后再重建，本任务未清理任何既有实例。
 
 验收映射：`backend/tests/session.rs` 覆盖固定时间、Origin/格式、节流/过载和凭证磁盘保护；`session_process.rs` 使用 SIGKILL 和正常退出后重启验证有效会话、固定到期时间、消息与发送标识保留及重放不重复（S001-A15 子进程部分）；Playwright 连接真实后端验证 Cookie、刷新恢复、外层 401、到期隐藏、迟到读取和登录响应丢失（S001-A08/A14 的当前切片）。文本草稿/消息相关验收见下方 #9；退出及撤销验证见下节。回环 localhost 的 Chromium 安全上下文不等于真实 HTTPS、稳定版 Chrome 或 Caddy 信任链验收，后者由 #13 完成。
 
@@ -388,7 +400,7 @@ docker compose --env-file .env -f deploy/compose.dev.yml exec backend \
 
 验收证据：`backend/tests/messages.rs` 覆盖 S001-A03/A05、最近页快照、认证/Origin、真实 COMMIT 失败回滚、应用重建和密码重置后的消息/身份保留；`web/tests/messages.ts` 连接真实后端完成独立会话互发与复制、共享校验样例、组合输入、双击、响应丢失、读取确认、同页到期恢复、来源标签持久化、草稿不持久化、跨页退出和迟到发送保护（S001-A02–A06/A08/A09/A13/A17 的本票范围）。Chromium 不替代 #13 稳定版 Chrome、真实 HTTPS 或真实剪贴板权限人工验收；A06/A07 恢复动作及历史分页验证见下节；A11/A12 增量补齐、定时同步验证见下方前台同步说明。
 
-本轮在尚未进入 `origin/main` 的 `0001_next_release.sql` 增加消息表。没有对既有实例执行迁移或清理；旧开发数据库不能用重新 init 处理，历史 checksum 不符且需保留的数据须另行处理结构兼容。
+消息表在首次发布前加入 `0001_next_release.sql`；该迁移现已冻结，不能继续改写。没有对既有实例执行迁移或清理；旧开发数据库不能用重新 init 处理，历史 checksum 不符且需保留的数据须另行处理结构兼容。
 
 ### 未知发送恢复
 

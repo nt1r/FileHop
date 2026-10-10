@@ -1,6 +1,6 @@
 # Spec 005：Android 认证与文本
 
-状态：范围已确认，待实现；[实施主 Issue #99](https://github.com/nt1r/FileHop/issues/99) 跟踪实施。近期先完成 Web 部署，Android 内部设计在开工时确定。
+状态：范围已确认，实施中；[实施主 Issue #99](https://github.com/nt1r/FileHop/issues/99) 跟踪实现与验证。Web 正式自用前置已完成；工具链与安装说明见 [Android 指南](../android.md)，构建通过不代表手机验收完成。
 
 关联：[产品基线](../product.md) · [路线图](../roadmap.md) · [Spec 001](001-desktop-text-loop.md) · [Spec 004](004-web-production-deployment.md) · [Spec 006](006-android-files.md)。本文件是本切片唯一权威来源，实施 Issue 只引用范围和验证编号，不重复维护完整需求。
 
@@ -12,7 +12,7 @@
 
 使用 Kotlin + Jetpack Compose 原生应用，在用户实际使用的手机上完成登录、与 Web 双向文本交换及复制。界面保持现代、美观，提供最近消息、加载更早、来源标签编辑和手动刷新；前台同步，后台暂停常规轮询。
 
-首次配置一个 HTTPS 域名根地址，默认正式域名，确认后固定；更换需清除应用数据。通过 GitHub Release 签名 APK 手动安装和更新。SDK、最低版本及工具链在开工时按实际手机确定，不承诺 Android 10 或多版本/厂商验收矩阵。
+首次配置一个 HTTPS 域名根地址，默认正式域名，确认后固定；更换需清除应用数据。通过 GitHub Release 签名 APK 手动安装和更新。首版最低版本按实际手机确定为 Android 16 / API 36，工具链见 [Android 指南](../android.md)；不承诺 Android 10 或多版本/厂商验收矩阵。
 
 ## 3. User Stories
 
@@ -39,7 +39,7 @@
 
 ### 客户端和服务器地址
 
-- Android 使用 Kotlin + Jetpack Compose；开发版使用独立 application ID，与正式版数据隔离。
+- Android 使用 Kotlin + Jetpack Compose；正式 application ID 和 namespace 统一为 `top.hammerbilly.filehop`，开发版 application ID 为 `top.hammerbilly.filehop.dev`，与正式版数据隔离。首版最低及目标版本为 Android 16 / API 36，仅验证实际手机；编译 SDK 可随稳定工具链升级，当前版本见 Android 指南，不据此提高最低版本或改变目标系统行为。构建在 GitHub 托管 x86-64 runner 上使用官方 SDK，不要求开发 VPS 安装第三方 ARM64 工具。
 - 只配置一个 HTTPS 域名根地址，无 userinfo、其他路径、query 或 fragment。使用标准 URL 解析器，HTTPS 验证不可绕过。
 - 凭证只发往配置的 origin；敏感请求不自动跟随重定向。
 - 不提前锁死内部模块、状态机或 SDK 版本，先实现实际手机的正常使用路径。
@@ -47,7 +47,7 @@
 ### 认证与安全
 
 - 使用独立随机 Bearer Token；服务器只保存摘要、原生会话类型及固定 12 小时到期时间，不采用刷新 Token，不保存密码。
-- `POST/GET/DELETE /api/native/session` 分别登录、检查、撤销会话。原生登录使用 JSON，不设置 Web Cookie，复用现有密码校验和节流。
+- `POST/GET/DELETE /api/native/session` 分别登录、检查、撤销会话。原生登录使用 JSON `{ "username": "...", "password": "..." }`，成功返回 `{ "token": "...", "expires_at": 0, "server_time": 0 }`，两个时间为 Unix 秒。检查返回同样的时间字段但不重新返回 Token；撤销返回 `{ "state": "logged_out" }`，重复撤销同一合法格式 Token 可成功。原生接口不设置 Web Cookie，复用现有密码校验和节流。响应均 `Cache-Control: no-store`，检查/撤销只接受原生 Bearer，不把 Web Cookie 当作原生会话。
 - 共享业务接口支持有效原生 Bearer；不能仅因没有 Origin 放行。Web Cookie 写入仍检查 Origin，混合 Cookie/Bearer 拒绝。密码重置撤销两类会话；普通服务重启不无故撤销有效登录。
 - 持久 Token 使用平台受保护存储并排除备份；密钥失效要求重新登录。退出立即清除本机 Token 与敏感内存，服务器撤销失败如实提示。
 - 冷启动检查会话；明确失效或已知到期时隐藏内容并重新登录。普通前台网络错误保留现有内容及草稿，不误报退出。
