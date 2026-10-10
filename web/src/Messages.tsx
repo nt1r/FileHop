@@ -14,6 +14,7 @@ import { Button } from '@cloudflare/kumo/components/button'
 import { Textarea } from '@cloudflare/kumo/components/input'
 import { LayerCard } from '@cloudflare/kumo/components/layer-card'
 import { Text } from '@cloudflare/kumo/components/text'
+import { useKumoToastManager } from '@cloudflare/kumo/components/toast'
 import { fileStateLabels, type useMessages, validLabel, validText } from './messages'
 import { type useFiles } from './files'
 import { formatBytes, formatMessageDate, formatMessageTime } from './format'
@@ -47,7 +48,7 @@ export default function Messages({ exchange, files }: { exchange: ReturnType<typ
   const composing = useRef(false)
   const picker = useRef<HTMLInputElement>(null)
   const [downloadNotice, setDownloadNotice] = useState('')
-  const [copyNotice, setCopyNotice] = useState('')
+  const toastManager = useKumoToastManager()
   const list = useRef<HTMLDivElement>(null)
   const positioned = useRef(false)
   const following = useRef(true)
@@ -78,9 +79,13 @@ export default function Messages({ exchange, files }: { exchange: ReturnType<typ
 
   // 复制结果不包含正文；复制动作必须由用户触发，不能随消息读取自动改写剪贴板。
   async function copy(text: string) {
-    setCopyNotice('')
-    try { await navigator.clipboard.writeText(text); setCopyNotice('已复制完整正文') }
-    catch { setCopyNotice('复制失败，请手动选择正文复制') }
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      toastManager.add({ title: '复制失败，请手动选择正文复制', variant: 'error' })
+      return
+    }
+    toastManager.add({ title: '复制成功', variant: 'success', timeout: 2000 })
   }
 
   async function download(fileId: string) {
@@ -131,19 +136,12 @@ export default function Messages({ exchange, files }: { exchange: ReturnType<typ
         </div>
       </div>
 
-      {Boolean(model.historyNotice || model.notice || copyNotice || downloadNotice || exchange.fileStatusNotice) && (
+      {Boolean(model.historyNotice || model.notice || downloadNotice || exchange.fileStatusNotice) && (
         <div className="message-notice-group">
           {(model.historyNotice || model.notice) && (
             <div className="message-notice" aria-live="polite">
               <Text variant={(model.historyNotice || model.notice).includes('成功') ? 'success' : 'error'} size="sm">
                 {model.historyNotice || model.notice}
-              </Text>
-            </div>
-          )}
-          {copyNotice && (
-            <div className="message-notice" aria-live="polite">
-              <Text variant={copyNotice.startsWith('复制失败') ? 'error' : 'success'} size="sm">
-                {copyNotice}
               </Text>
             </div>
           )}
