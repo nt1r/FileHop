@@ -17,12 +17,13 @@ data class Session(val token: String, val localExpiry: Long)
 class SessionStore(context: Context) {
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
     private val alias = "filehop.session"
+    private val defaultLabel = context.getString(R.string.default_source_label)
     private fun keys() = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
     var origin: String?
         get() = prefs.getString("origin", null)
         private set(value) { check(prefs.edit().putString("origin", value).commit()) }
     var label: String
-        get() = prefs.getString("label", "Android") ?: "Android"
+        get() = prefs.getString("label", defaultLabel) ?: defaultLabel
         set(value) { check(prefs.edit().putString("label", value).commit()) }
     fun configure(value: String) {
         check(origin == null)

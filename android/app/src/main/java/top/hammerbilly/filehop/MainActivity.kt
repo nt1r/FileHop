@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -62,19 +63,19 @@ private fun FileHop(vm: HopViewModel = viewModel()) {
     var editLabel by remember { mutableStateOf(false) }
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text("FileHop", fontWeight = FontWeight.Bold) }, actions = {
+            TopAppBar(title = { Text(stringResource(R.string.app_name), fontWeight = FontWeight.Bold) }, actions = {
                 if (screen.phase == Phase.Ready) {
-                    TextButton(onClick = { editLabel = true }) { Text("来源") }
-                    TextButton(onClick = { logout = true }) { Text("退出") }
+                    TextButton(onClick = { editLabel = true }) { Text(stringResource(R.string.action_source_label)) }
+                    TextButton(onClick = { logout = true }) { Text(stringResource(R.string.action_logout)) }
                 }
             })
         }
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).imePadding().padding(horizontal = 20.dp)) {
-            if (screen.notice.isNotEmpty()) {
+            screen.noticeRes?.let { notice ->
                 Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.medium,
                     modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                    Text(screen.notice, Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium)
+                    Text(stringResource(notice), Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium)
                 }
             }
             when (screen.phase) {
@@ -82,24 +83,24 @@ private fun FileHop(vm: HopViewModel = viewModel()) {
                 Phase.Login -> Login(screen, vm)
                 Phase.Checking -> Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     if (screen.loggingIn) LinearProgressIndicator(Modifier.fillMaxWidth())
-                    Text("检查登录状态")
-                    Button(onClick = vm::restore, enabled = !screen.loggingIn) { Text("重试") }
-                    TextButton(onClick = vm::logout) { Text("退出本机登录") }
+                    Text(stringResource(R.string.session_checking))
+                    Button(onClick = vm::restore, enabled = !screen.loggingIn) { Text(stringResource(R.string.action_retry)) }
+                    TextButton(onClick = vm::logout) { Text(stringResource(R.string.action_logout_local)) }
                 }
                 Phase.Ready -> Messages(screen, vm)
             }
         }
     }
-    if (logout) AlertDialog(onDismissRequest = { logout = false }, title = { Text("退出登录？") },
-        text = { Text("本机草稿和未确认发送信息将清除，服务器上已保存的消息不受影响。") },
-        confirmButton = { TextButton(onClick = { logout = false; vm.logout() }) { Text("退出") } },
-        dismissButton = { TextButton(onClick = { logout = false }) { Text("取消") } })
+    if (logout) AlertDialog(onDismissRequest = { logout = false }, title = { Text(stringResource(R.string.logout_title)) },
+        text = { Text(stringResource(R.string.logout_message)) },
+        confirmButton = { TextButton(onClick = { logout = false; vm.logout() }) { Text(stringResource(R.string.action_logout)) } },
+        dismissButton = { TextButton(onClick = { logout = false }) { Text(stringResource(R.string.action_cancel)) } })
     if (editLabel && screen.phase == Phase.Ready) {
         var label by remember { mutableStateOf(screen.label) }
-        AlertDialog(onDismissRequest = { editLabel = false }, title = { Text("来源标签") },
-            text = { OutlinedTextField(label, { label = it }, label = { Text("名称") }, singleLine = true) },
-            confirmButton = { TextButton(onClick = { vm.label(label); if (TextRules.label(label) != null) editLabel = false }) { Text("保存") } },
-            dismissButton = { TextButton(onClick = { editLabel = false }) { Text("取消") } })
+        AlertDialog(onDismissRequest = { editLabel = false }, title = { Text(stringResource(R.string.source_label_title)) },
+            text = { OutlinedTextField(label, { label = it }, label = { Text(stringResource(R.string.source_label_name)) }, singleLine = true) },
+            confirmButton = { TextButton(onClick = { vm.label(label); if (TextRules.label(label) != null) editLabel = false }) { Text(stringResource(R.string.action_save)) } },
+            dismissButton = { TextButton(onClick = { editLabel = false }) { Text(stringResource(R.string.action_cancel)) } })
     }
 }
 
@@ -108,17 +109,17 @@ private fun Configure(vm: HopViewModel) {
     var origin by remember { mutableStateOf(BuildConfig.DEFAULT_ORIGIN) }
     var confirm by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text("连接你的服务器", style = MaterialTheme.typography.headlineSmall)
+        Text(stringResource(R.string.configure_title), style = MaterialTheme.typography.headlineSmall)
         OutlinedTextField(origin, { origin = it }, modifier = Modifier.fillMaxWidth(),
-            label = { Text("HTTPS 服务器地址") }, singleLine = true,
+            label = { Text(stringResource(R.string.server_address_label)) }, singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
-        Text("确认后固定使用此地址。更换服务器需清除应用数据。", style = MaterialTheme.typography.bodyMedium)
-        Button(onClick = { confirm = true }, enabled = TextRules.origin(origin) != null) { Text("继续") }
+        Text(stringResource(R.string.server_address_hint), style = MaterialTheme.typography.bodyMedium)
+        Button(onClick = { confirm = true }, enabled = TextRules.origin(origin) != null) { Text(stringResource(R.string.action_continue)) }
     }
-    if (confirm) AlertDialog(onDismissRequest = { confirm = false }, title = { Text("确认服务器") },
+    if (confirm) AlertDialog(onDismissRequest = { confirm = false }, title = { Text(stringResource(R.string.server_confirm_title)) },
         text = { Text(TextRules.origin(origin).orEmpty()) },
-        confirmButton = { TextButton(onClick = { confirm = false; vm.configure(origin) }) { Text("确认") } },
-        dismissButton = { TextButton(onClick = { confirm = false }) { Text("返回") } })
+        confirmButton = { TextButton(onClick = { confirm = false; vm.configure(origin) }) { Text(stringResource(R.string.action_confirm)) } },
+        dismissButton = { TextButton(onClick = { confirm = false }) { Text(stringResource(R.string.action_back)) } })
 }
 
 @Composable
@@ -126,17 +127,17 @@ private fun Login(screen: Screen, vm: HopViewModel) {
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text("登录", style = MaterialTheme.typography.headlineMedium)
+        Text(stringResource(R.string.action_login), style = MaterialTheme.typography.headlineMedium)
         Text(screen.origin, style = MaterialTheme.typography.bodyMedium)
-        OutlinedTextField(username, { username = it }, label = { Text("用户名") }, singleLine = true,
+        OutlinedTextField(username, { username = it }, label = { Text(stringResource(R.string.username_label)) }, singleLine = true,
             modifier = Modifier.fillMaxWidth(), enabled = !screen.loggingIn)
-        OutlinedTextField(password, { password = it }, label = { Text("密码") }, singleLine = true,
+        OutlinedTextField(password, { password = it }, label = { Text(stringResource(R.string.password_label)) }, singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             modifier = Modifier.fillMaxWidth(), enabled = !screen.loggingIn)
         Button(onClick = { val value = password; password = ""; vm.login(username, value) },
             enabled = !screen.loggingIn && username.isNotEmpty() && password.isNotEmpty(), modifier = Modifier.fillMaxWidth()) {
-            Text(if (screen.loggingIn) "正在登录" else "登录")
+            Text(stringResource(if (screen.loggingIn) R.string.login_in_progress else R.string.action_login))
         }
     }
 }
@@ -158,10 +159,10 @@ private fun ColumnScope.Messages(screen: Screen, vm: HopViewModel) {
         }
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text("消息", style = MaterialTheme.typography.titleLarge)
-        TextButton(onClick = { vm.refresh() }, enabled = !screen.reading) { Text("刷新") }
+        Text(stringResource(R.string.messages_title), style = MaterialTheme.typography.titleLarge)
+        TextButton(onClick = { vm.refresh() }, enabled = !screen.reading) { Text(stringResource(R.string.action_refresh)) }
     }
-    if (screen.hasOlder) TextButton(onClick = { vm.refresh(older = true) }, enabled = !screen.reading) { Text("加载更早消息") }
+    if (screen.hasOlder) TextButton(onClick = { vm.refresh(older = true) }, enabled = !screen.reading) { Text(stringResource(R.string.action_load_older)) }
     if (screen.reading) LinearProgressIndicator(Modifier.fillMaxWidth())
     LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list, verticalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = PaddingValues(vertical = 12.dp)) {
@@ -171,40 +172,40 @@ private fun ColumnScope.Messages(screen: Screen, vm: HopViewModel) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(message.label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                     Text(if (message.kind == "TEXT") message.text else message.fileName, style = MaterialTheme.typography.bodyLarge)
-                    if (message.kind != "TEXT") Text("暂不支持在此版本打开文件", style = MaterialTheme.typography.bodySmall)
+                    if (message.kind != "TEXT") Text(stringResource(R.string.file_not_supported), style = MaterialTheme.typography.bodySmall)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text(message.time, style = MaterialTheme.typography.labelSmall)
                         if (message.kind == "TEXT") TextButton(onClick = {
                             try {
                                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                 clipboard.setPrimaryClip(ClipData.newPlainText("", message.text))
-                                vm.feedback("已复制正文")
-                            } catch (_: Exception) { vm.feedback("复制失败，请重试") }
-                        }) { Text("复制") }
+                                vm.feedback(R.string.notice_copy_success)
+                            } catch (_: Exception) { vm.feedback(R.string.notice_copy_failed) }
+                        }) { Text(stringResource(R.string.action_copy)) }
                     }
                 }
             }
         }
-        if (screen.messages.isEmpty() && !screen.reading) item { Text("还没有消息", style = MaterialTheme.typography.bodyLarge) }
+        if (screen.messages.isEmpty() && !screen.reading) item { Text(stringResource(R.string.messages_empty), style = MaterialTheme.typography.bodyLarge) }
     }
-    if (!nearBottom) TextButton(onClick = { scope.launch { if (screen.messages.isNotEmpty()) list.animateScrollToItem(screen.messages.lastIndex) } }) { Text("回到最新") }
+    if (!nearBottom) TextButton(onClick = { scope.launch { if (screen.messages.isNotEmpty()) list.animateScrollToItem(screen.messages.lastIndex) } }) { Text(stringResource(R.string.action_scroll_latest)) }
     var abandon by remember { mutableStateOf(false) }
     if (screen.pending != null) {
-        Text(if (screen.sending) "正在处理发送" else "发送结果未确认", style = MaterialTheme.typography.labelLarge)
+        Text(stringResource(if (screen.sending) R.string.send_in_progress else R.string.send_unconfirmed), style = MaterialTheme.typography.labelLarge)
         Row {
-            TextButton(onClick = { vm.resolve(query = true) }, enabled = !screen.sending) { Text("查询结果") }
-            TextButton(onClick = { vm.resolve(query = false) }, enabled = !screen.sending) { Text("同次重试") }
-            TextButton(onClick = { abandon = true }, enabled = !screen.sending) { Text("放弃确认") }
+            TextButton(onClick = { vm.resolve(query = true) }, enabled = !screen.sending) { Text(stringResource(R.string.action_query_result)) }
+            TextButton(onClick = { vm.resolve(query = false) }, enabled = !screen.sending) { Text(stringResource(R.string.action_retry_same_send)) }
+            TextButton(onClick = { abandon = true }, enabled = !screen.sending) { Text(stringResource(R.string.action_abandon_confirmation)) }
         }
     }
-    OutlinedTextField(screen.draft, vm::draft, modifier = Modifier.fillMaxWidth(), label = { Text("消息正文") },
+    OutlinedTextField(screen.draft, vm::draft, modifier = Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.message_body_label)) },
         enabled = screen.pending == null, minLines = 2, maxLines = 5)
     Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text("${screen.draft.toByteArray(Charsets.UTF_8).size} / 65,536 字节", style = MaterialTheme.typography.labelSmall)
-        Button(onClick = vm::send, enabled = screen.pending == null && TextRules.validText(screen.draft)) { Text("发送") }
+        Text(stringResource(R.string.message_byte_count, screen.draft.toByteArray(Charsets.UTF_8).size), style = MaterialTheme.typography.labelSmall)
+        Button(onClick = vm::send, enabled = screen.pending == null && TextRules.validText(screen.draft)) { Text(stringResource(R.string.action_send)) }
     }
-    if (abandon) AlertDialog(onDismissRequest = { abandon = false }, title = { Text("放弃确认？") },
-        text = { Text("原消息可能已经保存，请先检查历史。放弃不是撤回，再次发送可能重复。") },
-        confirmButton = { TextButton(onClick = { abandon = false; vm.abandon() }) { Text("放弃确认") } },
-        dismissButton = { TextButton(onClick = { abandon = false }) { Text("取消") } })
+    if (abandon) AlertDialog(onDismissRequest = { abandon = false }, title = { Text(stringResource(R.string.abandon_title)) },
+        text = { Text(stringResource(R.string.abandon_message)) },
+        confirmButton = { TextButton(onClick = { abandon = false; vm.abandon() }) { Text(stringResource(R.string.action_abandon_confirmation)) } },
+        dismissButton = { TextButton(onClick = { abandon = false }) { Text(stringResource(R.string.action_cancel)) } })
 }

@@ -64,6 +64,13 @@ namespace 与 Kotlin 包名同为 `top.hammerbilly.filehop`；开发版仅 appli
 
 更新前保存草稿；Web/后端不兼容更新时同步更新 APK，不承诺旧客户端兼容或进程内草稿恢复。不建设应用内自动更新。首次正式安装及一次同签名覆盖更新必须在实际手机验证，发布成功本身不是 A04 通过。
 
+## 界面字符串规范
+
+- 应用提供的按钮、标题、输入标签、确认说明、反馈及无障碍文案放入 `android/app/src/main/res/values/strings.xml`，按语义命名（如 `action_send`、`notice_send_unconfirmed`），不在 Compose 或 ViewModel 中硬编码。当前默认资源保留中文，不为资源化额外增加翻译。
+- Compose 用 `stringResource()` 按当前资源配置解析；当前反馈状态保存带 `@StringRes` 注解的资源 ID，`null` 表示无反馈，不在 ViewModel 中预先解析并缓存某种语言的文案。非 Compose 初始化需要字符串时使用 `Context.getString()`，不为取文案持有 Activity。
+- 带数值的文案使用资源占位符（如 `%1$d`），不拼接句子；需要复数规则时使用 `plurals` / `pluralStringResource()`。不要把提示和按钮文案当作业务状态或协议标识。
+- `FileHop` 产品名和稳定的默认来源标签 `Android` 标为 `translatable="false"`。已保存的用户来源标签、正文、文件名及服务器地址属于数据，原样展示，不翻译或重写。API 路径、JSON 字段、错误码、存储键等技术常量不放进字符串资源。
+
 ## 验证边界
 
 Rust 原生认证测试使用公开 HTTP API 和真实临时 SQLite/文件目录；迁移测试从冻结的 v0.1.0 初始迁移建立合成旧实例。Android 单元测试只检查来源地址及正文/标签公共规则。
