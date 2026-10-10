@@ -4,15 +4,13 @@
 
 ## 工具链与构建
 
-首版以 Android 16（API 36）为最低及目标版本，不承诺旧系统兼容。使用 Kotlin/Compose Compiler 2.4.21、Compose BOM 2026.09.00、AGP 9.4.1、Gradle Wrapper 9.8.1、Amazon Corretto 25 LTS（Java/Kotlin 字节码目标仍为 17）；不依赖机器全局 Gradle 的版本。
+首版最低及目标版本为 Android 16（API 36），不承诺旧系统兼容。使用仓库 Gradle Wrapper，不依赖全局 Gradle；插件、Compose BOM 和依赖版本以 [`android/build.gradle.kts`](../android/build.gradle.kts)、[`app/build.gradle.kts`](../android/app/build.gradle.kts) 及 [Wrapper 配置](../android/gradle/wrapper/gradle-wrapper.properties) 为准。编译 SDK 升级不自动改变最低版本或目标系统行为。
 
-Java 发行版统一为 Amazon Corretto，选择仍受支持且与构建工具兼容的 LTS 支持线；Android 检查与正式发布使用相同发行版及版本选择配置。本地开发也使用相同发行版和 LTS 支持线。当前 `setup-java` 的 Corretto 适配器仅支持大版本选择，因此配置 `25` 和 `check-latest: true`：每次查询上游补丁版本，不是精确补丁锁定，不保证不同日期运行的补丁号相同。实际解析版本以 CI 安装日志为准；如需严格复现补丁版本，应改用固定官方归档并校验摘要。升级 LTS 主版本需显式修改配置并重新验证，不自动切换到非 LTS 最新版。
+Java 统一使用兼容的受支持 Amazon Corretto LTS，检查、正式发布及本地构建保持同一支持线。具体选择见 [Android checks](../.github/workflows/android-check.yml)。`setup-java` 的 Corretto 适配器按大版本和 `check-latest` 解析补丁，并非精确补丁锁定；实际版本以日志为准。如需严格补丁复现，使用固定官方归档及摘要；升级 LTS 须显式提交和验证。
 
-AGP 9 使用内置 Kotlin，根构建脚本显式选择较新的 KGP，不再应用 `org.jetbrains.kotlin.android`；编译选项使用 `kotlin.compilerOptions`。Compose 库统一由稳定版 BOM 管理，不单独混入 alpha/beta/RC。JUnit 保留当前坐标最新的 4.13.2，不为追求另一代版本号引入新的测试平台。直接依赖及 BOM 管理项分别核对 Google Maven/Maven Central，间接依赖按上游约束解析，不无差别强制覆盖。
+AGP 使用内置 Kotlin；较新的 KGP 在根脚本覆盖，不重复应用 `org.jetbrains.kotlin.android`。Compose 库由稳定 BOM 管理，直接依赖核对 Google Maven／Maven Central，间接依赖遵循上游约束，不为版本号无差别强制覆盖或更换测试平台。升级参考 [AGP](https://developer.android.com/build/releases/agp-9-4-0-release-notes)、[内置 Kotlin](https://developer.android.com/build/migrate-to-built-in-kotlin)、[Kotlin 兼容表](https://kotlinlang.org/docs/gradle-configure-project.html)及 [Gradle 兼容表](https://docs.gradle.org/current/userguide/compatibility.html)；超出上游完全支持表的组合，以实际构建、Lint、测试和签名冒烟验证，不宣称上游全矩阵认证。
 
-上游参考：[AGP 9.4 兼容要求](https://developer.android.com/build/releases/agp-9-4-0-release-notes)、[内置 Kotlin 迁移](https://developer.android.com/build/migrate-to-built-in-kotlin)、[KGP 版本覆盖](https://developer.android.com/build/releases/agp-9-0-0-release-notes#runtime-dependency-on-kotlin-gradle-plugin)、[Kotlin 兼容表](https://kotlinlang.org/docs/gradle-configure-project.html)、[Gradle 兼容表](https://docs.gradle.org/current/userguide/compatibility.html)。Kotlin 文档的“完全支持”版本表可能滞后于新稳定版；超出该表的组合不宣称已获上游全矩阵认证，须由当前提交的实际构建、Lint、测试和签名冒烟验证。
-
-Android 检查在 GitHub 托管 `ubuntu-24.04` x86-64 runner 上使用官方 Command-line Tools 23.0（16111833）、SDK Platform 37.2 / Build Tools 37.0.0。`compileSdk` 升到 37.2 只更新编译环境，不改变 `minSdk=36` 或 `targetSdk=36` 的设备范围及目标行为。开发 VPS 不安装第三方 ARM64 SDK、ADB 或模拟执行层。本地能编辑源码和运行 Rust 隔离测试，不据此宣称 Android 编译通过。
+构建使用 GitHub 托管 Linux x86-64 runner 和官方 SDK，版本及归档校验见 [`scripts/setup-android-sdk.sh`](../scripts/setup-android-sdk.sh)。开发 VPS 不安装第三方 ARM64 SDK、ADB 或模拟执行层；本地源码编辑或 Rust 测试不证明 Android 编译通过。
 
 `.github/workflows/android-check.yml` 在 PR 到 dev/main 或手动触发时运行：
 
@@ -23,11 +21,11 @@ cd android
 
 同一 job 还通过 `tests/android_release_smoke.sh` 使用一次性合成密钥检查 release 构建、签名校验、正式 application ID/versionCode 和非调试属性；该 APK 不发布，不能代替正式密钥或手机覆盖更新验收。
 
-`filehop-dev-<sha>` artifact 包含开发 APK，保留 7 天。只安装自己信任的提交构建，不将任意外部 PR APK 当作可信发布。Gradle Wrapper JAR 与下载的 Gradle 分发包均校验固定 SHA-256。
+`filehop-dev-<sha>` artifact 包含开发 APK，保留时间以 workflow 为准。只安装自己信任的提交构建，不将任意外部 PR APK 当作可信发布。Gradle Wrapper JAR 与下载的 Gradle 分发包均校验固定 SHA-256。
 
 正式 application ID 为 `top.hammerbilly.filehop`，开发版为 `top.hammerbilly.filehop.dev`。两版设置、密钥和登录相互隔离。开发 APK 使用 runner 的临时 debug 签名，不保证不同构建可覆盖安装；签名不同时需要卸载开发版后重装，开发版数据会丢失。正式版必须沿用同一正式签名，不通过卸载实现更新。
 
-namespace 与 Kotlin 包名同为 `top.hammerbilly.filehop`；开发版仅 application ID 增加 `.dev`，Activity 类名仍属于正式 namespace。已安装使用其他 application ID 的早期 APK 时，新包属于另一款应用，不能覆盖安装或自动继承其设置与凭证，需要重新配置和登录；不会自动卸载旧包或删除其数据。应用标识不是服务器地址，不会自动改变已确认的 origin。
+application ID 不同即为另一款应用，不能覆盖安装或继承其设置与凭证；需要重新配置和登录，不自动卸载旧包或删除数据。应用标识不是服务器地址，不改变已确认的 origin。
 
 ## 首次配置与使用
 

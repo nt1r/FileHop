@@ -8,31 +8,22 @@ FileHop is a lightweight, self-hosted text and file exchange tool for desktop We
 - Before selecting implementation work, read [docs/roadmap.md](docs/roadmap.md) and the relevant Spec linked there. Follow the current request rather than automatically advancing to the next stage.
 - Before writing tests, fixing defects, or assessing delivery readiness, read [docs/testing.md](docs/testing.md). Agree on the public boundaries under test before adding tests.
 - For changes spanning authentication, file lifecycle, client behavior, or deployment, read the affected Specs and their cross-references. Read unrelated Specs only when needed.
+- For Web UI or styling changes, read [web/README.md](web/README.md). For Android UI text, read the [string conventions](docs/android.md#界面字符串规范); for Android builds, signing, or installation, read the relevant sections of [docs/android.md](docs/android.md).
+- For development setup or checks, read [docs/development.md](docs/development.md). For deployment, migration, or update operations, read [docs/production.md](docs/production.md).
 - Before creating or updating a PR description, read [.github/pull_request_template.md](.github/pull_request_template.md) and follow its structure.
 
 ## Agent skills
 
-### Issue tracker
-
-Track tasks and bugs in GitHub Issues; repository Specs remain authoritative.
-Before issue operations, read [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md).
-
-### Triage labels
-
-Use the five canonical triage labels.
-Before classifying or labeling issues, read [docs/agents/triage-labels.md](docs/agents/triage-labels.md).
-
-### Domain docs
-
-Use the single-context layout: root CONTEXT.md and optional docs/adr/.
-Before domain exploration or decision changes, read [docs/agents/domain.md](docs/agents/domain.md).
+- **Issue operations:** read [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md) for body-first updates and Spec references.
+- **Triage:** read [docs/agents/triage-labels.md](docs/agents/triage-labels.md) before classifying or labeling issues.
+- **Domain exploration or decisions:** read [docs/agents/domain.md](docs/agents/domain.md) for the single-context layout.
 
 ## Sources of Truth
 
 - `CONTEXT.md` defines domain terms, not implementation details.
 - `docs/product.md` defines product scope and shared constraints.
 - `docs/specs/` defines slice-specific behavior, technical contracts, and acceptance criteria.
-- `docs/roadmap.md` maps delivery stages to Specs.
+- `docs/roadmap.md` maps delivery stages and high-level status to Specs; Issues and PRs hold implementation progress and evidence.
 - `docs/testing.md` defines testing and delivery quality principles.
 - An approved Spec is not evidence that a feature has been implemented or verified.
 - Surface conflicting requirements before implementing the disputed behavior. Keep confirmed scope intact unless the user authorizes a change.

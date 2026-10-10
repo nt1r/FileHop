@@ -1,46 +1,35 @@
 # FileHop 交付路线图
 
-以单人自用的实际路径为完成标准，不以清空所有设想和验收记录为目标。关联：[产品基线](product.md) · [测试原则](testing.md)。
+本页维护大阶段状态及 Spec／实施入口；详细进度和执行证据在主 Issue、PR 与 CI 中。范围见[产品基线](product.md)，完成判定与证据复用见[测试原则](testing.md)。按当前授权推进，不因路线图存在就自动实施或部署。
 
 ## 已有能力
 
-| 切片 | 权威 Spec | 当前状态 |
+| 切片 | 权威 Spec | 当前状态与实施入口 |
 | --- | --- | --- |
-| 桌面文本 | [001](specs/001-desktop-text-loop.md) | 已实现；旧阶段仍有人工记录缺口，见 #4、PR #30/#32，不伪称已补验，也不再单开验收循环 |
-| 桌面文件传输 | [002](specs/002-desktop-file-transfer.md) | 原版验收通过，见 [#33](https://github.com/nt1r/FileHop/issues/33)；Spec 007 B 单轮/串行及 C 登录失效后丢弃文件批次已实现 |
-| 服务器文件管理 | [003](specs/003-server-file-management.md) | 已实现；桌面验收由 [#60](https://github.com/nt1r/FileHop/issues/60)/PR #73 收口，主票 [#52](https://github.com/nt1r/FileHop/issues/52) 复用既有证据，不重做验收 |
+| 桌面文本 | [001](specs/001-desktop-text-loop.md) | 已实现；[#4](https://github.com/nt1r/FileHop/issues/4) 保留旧人工记录缺口，不伪称补验，也不重开完整验收循环 |
+| 桌面文件传输 | [002](specs/002-desktop-file-transfer.md) | 原版验收通过，见 [#33](https://github.com/nt1r/FileHop/issues/33)；后续交互精简见下节 |
+| 服务器文件管理 | [003](specs/003-server-file-management.md) | 已实现；主 Issue [#52](https://github.com/nt1r/FileHop/issues/52) 复用 [#60](https://github.com/nt1r/FileHop/issues/60)／[PR #73](https://github.com/nt1r/FileHop/pull/73) 的桌面证据；后续交互精简见下节 |
+| Web 生产部署 | [004](specs/004-web-production-deployment.md) | 已正式自用，见 [#74](https://github.com/nt1r/FileHop/issues/74)；运行方式见[生产指南](production.md) |
 
-现有鉴权、准备幂等、额度、存储删除与恢复保护保留；上传强停止/后继重传及客户端自动协调按用户确认撤销，不借机重写存储。原生认证及 S002-F17、S003-M13 的原生部分随 Android 切片实施，集成进度见 [PR #112](https://github.com/nt1r/FileHop/pull/112)，不据此宣告真机或发布验收完成。
+Web v0.1.0 的实际使用、保留挂载重建后的数据保留、云入站规则及独立外部网络检查已由用户确认，见 [#84](https://github.com/nt1r/FileHop/issues/84)。这是用户确认，不写成代理实测；旧任务关闭或范围收敛也不表示原计划全部实现。
 
-## 当前改造：已实现流程精简
+## 流程精简
 
-[Spec 007](specs/007-implemented-flow-simplification.md)：A 单入口删除与手动刷新、B 单轮发送及串行队列、C 登录失效后丢弃文件批次均已实现，稳定版桌面 Chrome 人工确认待完成。到期清空等待项和全部 File 引用，仅保留草稿与未确认发送信息；重登可手动查询或结束本轮，不自动恢复批次。Spec 002/003 的旧验收不能证明新交互通过。
+[Spec 007](specs/007-implemented-flow-simplification.md) 的 A 单入口删除与手动刷新、B 单轮发送及串行队列、C 登录失效后丢弃文件批次均已实现，**稳定版桌面 Chrome 人工确认仍待完成**，由 [#89](https://github.com/nt1r/FileHop/issues/89) 跟踪。Spec 002／003 的旧验收不能证明这些新交互已通过。
 
-按当前授权实施各切片，不自动推进部署或新建远期任务；不重新打开旧验收循环。
+长期行为以 Spec 002／003 为准；精简不撤销既有认证、准备幂等、容量和清理恢复保护，不改变文本同次重试规则。
 
-## 已完成：Web 正式自用
+## Android
 
-[Spec 004](specs/004-web-production-deployment.md) / [#74](https://github.com/nt1r/FileHop/issues/74)，收敛为三个任务：
+| 切片 | 权威 Spec | 当前状态与实施入口 |
+| --- | --- | --- |
+| 原生认证与文本 | [005](specs/005-android-text-loop.md) | 实施中，见 [#99](https://github.com/nt1r/FileHop/issues/99)；Web 正式自用前置已满足，真机及正式签名覆盖更新验收尚未完成 |
+| 文件交换 | [006](specs/006-android-files.md) | 范围概要，待实现；先完成文本闭环，暂不拆实施票 |
 
-1. **生产能运行（#75）**：已完成，包含静态页面、隔离 HTTPS、独立配置与挂载、初始化及冒烟。
-2. **能安全手动更新（#83）**：已完成可信产物发布及简单手动更新入口，包含目标镜像迁移、停旧服务后更新和失败保留数据；不建设发布平台。
-3. **正式部署并实际使用（#84）**：v0.1.0 已正式部署，运行说明已提供，用户已确认实际使用及保留挂载重建后的数据保留；用户已确认剩余云入站规则及独立外部网络检查通过，按人工确认收口。
-
-PR #87 的独立迁移、实例互斥和内部就绪检查已复用；#83 及 v0.1.0 发布已完成目标产物组合与数据保留检查。首次发布不虚构旧发布结构；后续出现新迁移时再验证最近实际发布结构到目标版本的升级。旧 #76–#82 的剩余必要工作并入以上任务；#78 的旧客户端稳定控制协议撤销。已关闭子票表示范围收敛或合并，不表示原计划实现。
-
-更新前保存草稿、结束传输，更新后刷新 Web；允许停机和人工排障，不保证旧客户端跨不兼容更新继续操作。不为流程引擎、兼容矩阵或重复人工验收延迟上线。
-
-## 之后：自己的 Android 手机
-
-- [Spec 005](specs/005-android-text-loop.md) / [#99](https://github.com/nt1r/FileHop/issues/99)：范围已确认，先做登录、文本交换和复制，实际手机验证即可；罕见异常遇到再处理。
-- [Spec 006](specs/006-android-files.md)：再做串行上传/下载，系统选择文件和保存位置。不做应用内本地下载管理；服务器清理先用 Web。
-
-Spec 005 已按确认范围拆为 [#100](https://github.com/nt1r/FileHop/issues/100) 登录与读取、[#101](https://github.com/nt1r/FileHop/issues/101) 双向文本与历史、[#102](https://github.com/nt1r/FileHop/issues/102) 签名 APK 与更新；#100 的 Web 正式自用前置条件已满足，#101/#102 均依赖 #100；后续实施仍按用户授权推进。Spec 006 保持概要，不提前拆票。不锁死内部状态机或建设全部测试。首版已确定 Android 16 / API 36，使用 GitHub 托管 x86-64 runner 的官方 SDK 构建，工具链、安装及待授权签名配置见 [Android 指南](android.md)。
+S002-F17、S003-M13 的原生认证部分随 Spec 005 补验，不据后端集成或 APK 构建宣告手机交付。工具链、官方 SDK 构建、安装和待授权签名配置见 [Android 指南](android.md)。
 
 ## 完成标准
 
-Web 和自己的手机能日常交换文本、文件；认证有效、资源有界、更新不误删数据，已知限制可接受即可。先上线用起来，再根据实际问题修复体验与兼容性。
+Web 和自己的手机能日常交换文本、文件；认证有效、资源有界、更新不误删数据，已知限制可接受即可。先用起来，再根据实际问题修复体验与兼容性。
 
-不包括备份恢复、高可用、实时推送、后台可靠传输、全平台适配、应用内本地文件管理及旧客户端兼容协议。这些不是待清空的承诺。
-
-验证只补实际风险和缺口；已有适用证据直接复用，不逐阶段重复确认。生产部署、共享入口/网络及远端设置仍需要显式操作授权，文档与 Issue 修改不代表已部署。
+备份恢复、高可用、实时推送、后台可靠传输、全平台适配、应用内本地文件管理及旧客户端兼容协议均不在当前承诺中。生产部署、共享入口／网络及远端设置仍需显式授权，文档和 Issue 更新不代表已部署。
