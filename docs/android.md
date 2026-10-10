@@ -25,7 +25,9 @@ cd android
 
 `filehop-dev-<sha>` artifact 包含开发 APK，保留 7 天。只安装自己信任的提交构建，不将任意外部 PR APK 当作可信发布。Gradle Wrapper JAR 与下载的 Gradle 分发包均校验固定 SHA-256。
 
-正式 application ID 为 `io.github.nt1r.filehop`，开发版为 `io.github.nt1r.filehop.dev`。两版设置、密钥和登录相互隔离。开发 APK 使用 runner 的临时 debug 签名，不保证不同构建可覆盖安装；签名不同时需要卸载开发版后重装，开发版数据会丢失。正式版必须沿用同一正式签名，不通过卸载实现更新。
+正式 application ID 为 `top.hammerbilly.filehop`，开发版为 `top.hammerbilly.filehop.dev`。两版设置、密钥和登录相互隔离。开发 APK 使用 runner 的临时 debug 签名，不保证不同构建可覆盖安装；签名不同时需要卸载开发版后重装，开发版数据会丢失。正式版必须沿用同一正式签名，不通过卸载实现更新。
+
+namespace 与 Kotlin 包名同为 `top.hammerbilly.filehop`；开发版仅 application ID 增加 `.dev`，Activity 类名仍属于正式 namespace。已安装使用其他 application ID 的早期 APK 时，新包属于另一款应用，不能覆盖安装或自动继承其设置与凭证，需要重新配置和登录；不会自动卸载旧包或删除其数据。应用标识不是服务器地址，不会自动改变已确认的 origin。
 
 ## 首次配置与使用
 

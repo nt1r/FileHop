@@ -1,4 +1,4 @@
-package io.github.nt1r.filehop
+package top.hammerbilly.filehop
 
 import org.junit.Assert.*
 import org.junit.Test

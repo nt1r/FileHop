@@ -1,4 +1,4 @@
-package io.github.nt1r.filehop
+package top.hammerbilly.filehop
 
 import android.content.ClipData
 import android.content.ClipboardManager

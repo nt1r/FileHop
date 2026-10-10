@@ -101,7 +101,7 @@ jobs:
           actual=$(awk -F': ' '/^Signer #1 certificate SHA-256 digest:/ {print $2}' "$RUNNER_TEMP/android-signature.txt")
           [[ "$actual" == "$EXPECTED_CERT" ]]
           jq -n --arg version "$VERSION" --arg sha "$RELEASE_SHA" --arg cert "$actual" --argjson code "$VERSION_CODE" \
-            '{version:$version,sha:$sha,version_code:$code,application_id:"io.github.nt1r.filehop",certificate_sha256:$cert}' \
+            '{version:$version,sha:$sha,version_code:$code,application_id:"top.hammerbilly.filehop",certificate_sha256:$cert}' \
             > android-release-assets/android-release.json
           (cd android-release-assets && sha256sum filehop.apk android-release.json > android-SHA256SUMS)
       - name: Attach APK to the existing release without replacing assets

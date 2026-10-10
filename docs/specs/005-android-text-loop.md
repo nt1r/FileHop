@@ -39,7 +39,7 @@
 
 ### 客户端和服务器地址
 
-- Android 使用 Kotlin + Jetpack Compose；开发版使用独立 application ID，与正式版数据隔离。首版最低及目标版本为 Android 16 / API 36，仅验证实际手机；编译 SDK 可随稳定工具链升级，当前版本见 Android 指南，不据此提高最低版本或改变目标系统行为。构建在 GitHub 托管 x86-64 runner 上使用官方 SDK，不要求开发 VPS 安装第三方 ARM64 工具。
+- Android 使用 Kotlin + Jetpack Compose；正式 application ID 和 namespace 统一为 `top.hammerbilly.filehop`，开发版 application ID 为 `top.hammerbilly.filehop.dev`，与正式版数据隔离。首版最低及目标版本为 Android 16 / API 36，仅验证实际手机；编译 SDK 可随稳定工具链升级，当前版本见 Android 指南，不据此提高最低版本或改变目标系统行为。构建在 GitHub 托管 x86-64 runner 上使用官方 SDK，不要求开发 VPS 安装第三方 ARM64 工具。
 - 只配置一个 HTTPS 域名根地址，无 userinfo、其他路径、query 或 fragment。使用标准 URL 解析器，HTTPS 验证不可绕过。
 - 凭证只发往配置的 origin；敏感请求不自动跟随重定向。
 - 不提前锁死内部模块、状态机或 SDK 版本，先实现实际手机的正常使用路径。
