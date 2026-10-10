@@ -24,7 +24,7 @@ Web v0.1.0 的实际使用、保留挂载重建后的数据保留、云入站规
 | 切片 | 权威 Spec | 当前状态与实施入口 |
 | --- | --- | --- |
 | 原生认证与文本 | [005](specs/005-android-text-loop.md) | 实施中，见 [#99](https://github.com/nt1r/FileHop/issues/99)；Web 正式自用前置已满足，真机及正式签名覆盖更新验收尚未完成 |
-| 文件交换 | [006](specs/006-android-files.md) | 范围概要，待实现；先完成文本闭环，暂不拆实施票 |
+| 文件交换 | [006](specs/006-android-files.md) | 范围已确认，待实现，主票及实施切片见 [#115](https://github.com/nt1r/FileHop/issues/115)；先完成文本闭环 |
 
 S002-F17、S003-M13 的原生认证部分随 Spec 005 补验，不据后端集成或 APK 构建宣告手机交付。工具链、官方 SDK 构建、安装和待授权签名配置见 [Android 指南](android.md)。
 
