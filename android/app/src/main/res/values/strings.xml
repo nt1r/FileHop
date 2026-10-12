@@ -16,7 +16,13 @@
     <string name="configure_title">连接你的服务器</string>
     <string name="server_address_label">HTTPS 服务器地址</string>
     <string name="server_address_example" translatable="false">https://filehop.example.invalid</string>
-    <string name="server_address_hint">确认后固定使用此地址。更换服务器需清除应用数据。</string>
+    <string name="server_address_hint">地址会保存在本机。之后可更换服务器，更换后需重新登录。</string>
+    <string name="action_change_server">更换服务器</string>
+    <string name="server_change_confirm_title">更换服务器？</string>
+    <string name="server_change_warning">更换后需重新登录，当前草稿和未确认发送信息将清除。未确认的消息可能已发送，请先检查原服务器历史。服务器记录及已保存文件不会删除。</string>
+    <string name="notice_server_changed">服务器已更换，请重新登录</string>
+    <string name="notice_server_change_failed">无法保存新地址，已退出本机登录。请重新更换服务器后再登录。</string>
+    <string name="notice_finish_send_before_server_change">请等待当前发送或查询结束后再更换服务器</string>
     <string name="action_continue">继续</string>
     <string name="server_confirm_title">确认服务器</string>
     <string name="action_confirm">确认</string>
@@ -44,7 +50,7 @@
     <string name="action_send">发送</string>
     <string name="abandon_title">放弃确认？</string>
     <string name="abandon_message">原消息可能已经保存，请先检查历史。放弃不是撤回，再次发送可能重复。</string>
-    <string name="notice_server_config_invalid">服务器配置无效，请清除应用数据后重新配置</string>
+    <string name="notice_server_config_invalid">服务器配置无效，请更换服务器地址</string>
     <string name="notice_server_address_invalid">请输入 HTTPS 域名根地址，不含路径、账号或查询参数</string>
     <string name="notice_server_address_save_failed">无法保存服务器地址</string>
     <string name="notice_source_label_invalid">来源标签须为 1–64 个字符</string>

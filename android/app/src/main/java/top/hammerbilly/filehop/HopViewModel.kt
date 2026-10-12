@@ -61,11 +61,29 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     fun configure(origin: String) {
+        if (screen.phase != Phase.Configure) return
         val valid = TextRules.origin(origin)
         if (valid == null) { feedback(R.string.notice_server_address_invalid); return }
         runCatching { store.configure(valid) }.onFailure { feedback(R.string.notice_server_address_save_failed); return }
         api = Api(valid)
         screen = screen.copy(origin = valid, phase = Phase.Login, noticeRes = null)
+    }
+    fun changeServer(origin: String) {
+        val valid = TextRules.origin(origin)
+        if (valid == null) { feedback(R.string.notice_server_address_invalid); return }
+        if (valid == screen.origin && api != null) return
+        if (screen.sending) { feedback(R.string.notice_finish_send_before_server_change); return }
+        // Switching is local and must work even when the previous server is offline.
+        // In-flight requests keep their captured Api; generation rejects late responses.
+        val cleared = invalidate(true, null)
+        api = null
+        if (!cleared) return
+        try { store.configure(valid) } catch (_: Exception) {
+            feedback(R.string.notice_server_change_failed)
+            return
+        }
+        api = Api(valid)
+        screen = screen.copy(origin = valid, phase = Phase.Login, noticeRes = R.string.notice_server_changed)
     }
     fun feedback(@StringRes message: Int) { screen = screen.copy(noticeRes = message) }
     fun draft(text: String) { if (screen.pending == null) screen = screen.copy(draft = text) }
@@ -76,7 +94,7 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
         screen = screen.copy(label = normalized, noticeRes = R.string.notice_source_label_saved)
     }
     private fun clearStored(): Boolean = runCatching { store.clear() }.isSuccess
-    private fun invalidate(explicit: Boolean, @StringRes notice: Int?) {
+    private fun invalidate(explicit: Boolean, @StringRes notice: Int?): Boolean {
         generation++
         poll?.cancel(); expiry?.cancel()
         session = null; cursor = null; before = null
@@ -87,6 +105,7 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
             draft = if (explicit) "" else screen.draft,
             pending = if (explicit) null else screen.pending,
             noticeRes = if (cleared) notice else R.string.notice_credentials_clear_failed)
+        return cleared
     }
     fun restore() {
         if (screen.phase != Phase.Checking || screen.loggingIn) return
@@ -96,12 +115,13 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
         if (stored == null || stored.localExpiry <= System.currentTimeMillis()) {
             invalidate(false, if (stored == null) null else R.string.notice_session_expired); return
         }
+        val client = api ?: return
         session = stored
         val epoch = generation
         screen = screen.copy(loggingIn = true, noticeRes = null)
         viewModelScope.launch {
             try {
-                val checked = requireNotNull(api).check(stored.token)
+                val checked = client.check(stored.token)
                 if (generation == epoch) accept(checked)
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
@@ -114,11 +134,12 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun login(username: String, password: String) {
         if (screen.phase != Phase.Login || screen.loggingIn || api == null) return
+        val client = api ?: return
         val epoch = ++generation
         screen = screen.copy(loggingIn = true, noticeRes = null)
         viewModelScope.launch {
             try {
-                val authenticated = requireNotNull(api).login(username, password)
+                val authenticated = client.login(username, password)
                 if (generation == epoch) accept(authenticated)
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
@@ -149,11 +170,12 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
         if (foreground) { refresh(); startPolling() }
     }
     fun logout() {
+        val client = api
         val previous = session
         invalidate(true, R.string.notice_logout_local)
         val epoch = generation
         if (previous != null) viewModelScope.launch {
-            try { api?.logout(previous.token) }
+            try { client?.logout(previous.token) }
             catch (e: Exception) {
                 if (e is CancellationException) throw e
                 if (generation == epoch && !(e is ApiFailure && e.code == "session_invalid"))
@@ -205,6 +227,7 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
             noticeRes = if (confirmed) R.string.notice_send_success else screen.noticeRes)
     }
     fun refresh(manual: Boolean = true, older: Boolean = false) {
+        val client = api ?: return
         val token = session?.token ?: return
         val time = SystemClock.elapsedRealtime()
         if (!foreground || screen.phase != Phase.Ready || screen.reading || time < retryUntil ||
@@ -214,25 +237,25 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 if (older) {
-                    val page = requireNotNull(api).page(token, before = before)
+                    val page = client.page(token, before = before)
                     if (epoch != generation) return@launch
                     merge(page.messages); before = page.before
                     screen = screen.copy(hasOlder = page.hasOlder)
                 } else if (cursor == null) {
-                    val page = requireNotNull(api).page(token)
+                    val page = client.page(token)
                     if (epoch != generation) return@launch
                     require(page.syncCursor != null)
                     merge(page.messages); cursor = page.syncCursor; before = page.before
                     screen = screen.copy(hasOlder = page.hasOlder)
                 } else {
                     if (manual) {
-                        val latest = requireNotNull(api).page(token)
+                        val latest = client.page(token)
                         if (epoch != generation) return@launch
                         merge(latest.messages) // Never advance the incremental cursor from a recent snapshot.
                     }
                     do {
                         val start = cursor
-                        val page = requireNotNull(api).page(token, after = start)
+                        val page = client.page(token, after = start)
                         if (epoch != generation) return@launch
                         if (page.messages.isNotEmpty()) require(page.after != null && page.after > requireNotNull(start))
                         else require(!page.hasMore)
@@ -262,6 +285,7 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
         resolve(query = false, first = true)
     }
     fun resolve(query: Boolean, first: Boolean = false) {
+        val client = api ?: return
         val attempt = screen.pending ?: return
         val token = session?.token ?: return
         if (screen.phase != Phase.Ready || screen.sending || SystemClock.elapsedRealtime() < retryUntil) return
@@ -269,7 +293,7 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
         screen = screen.copy(sending = true, noticeRes = if (query) R.string.notice_query_in_progress else R.string.notice_send_in_progress)
         viewModelScope.launch {
             try {
-                val message = if (query) requireNotNull(api).result(token, attempt) else requireNotNull(api).send(token, attempt)
+                val message = if (query) client.result(token, attempt) else client.send(token, attempt)
                 if (epoch == generation) {
                     require(message.sendId == attempt.id && message.text == attempt.text && message.label == attempt.label)
                     merge(listOf(message))
