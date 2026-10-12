@@ -20,6 +20,7 @@ apk="$root/android/app/build/outputs/apk/release/app-release.apk"
 "$ANDROID_HOME/build-tools/37.0.0/aapt" dump badging "$apk" > "$temp/badging.txt"
 grep -F "package: name='top.hammerbilly.filehop' versionCode='2'" "$temp/badging.txt" >/dev/null
 grep -F "launchable-activity: name='top.hammerbilly.filehop.MainActivity'" "$temp/badging.txt" >/dev/null
+grep -E "^application: .*icon='[^']+'" "$temp/badging.txt" >/dev/null
 ! grep -q '^application-debuggable' "$temp/badging.txt"
 # Keystores are build inputs only, never APK assets.
 unzip -Z1 "$apk" > "$temp/apk-files.txt"

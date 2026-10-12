@@ -6,7 +6,6 @@ import {
   ClockCountdownIcon,
   FolderIcon,
   InfoIcon,
-  PaperPlaneTiltIcon,
   ShieldCheckIcon,
   SignInIcon,
   SignOutIcon,
@@ -23,6 +22,7 @@ import ServerFiles from './ServerFiles'
 import { useMessages, validLabel } from './messages'
 import { useFiles } from './files'
 import { UserAvatar } from './ui'
+import brandLogo from './assets/filehop-logo.png'
 
 type Session = { expires_at: number; server_time: number }
 type Phase = 'checking' | 'login' | 'authenticated' | 'unknown' | 'logout-pending'
@@ -366,7 +366,7 @@ export default function SessionPage({ onAuthenticatedChange }: { onAuthenticated
         <div className="workspace-nav-left">
           <div className="brand-mark">
             <div className="brand-icon-mini">
-              <PaperPlaneTiltIcon size={20} weight="fill" />
+              <img src={brandLogo} alt="" width={32} height={32} />
             </div>
             <Text variant="heading" as="h1" DANGEROUS_className="brand-title">FileHop</Text>
           </div>
