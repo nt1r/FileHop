@@ -11,7 +11,7 @@ permissions:
 jobs:
   main-source-policy:
     name: main-source-policy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       # Read trusted event metadata only. Never check out or execute PR code here.
       - name: Check pull request branch policy

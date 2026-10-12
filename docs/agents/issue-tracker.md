@@ -47,17 +47,7 @@ body-first policy unless the user explicitly requests a comment.
 Confirm the target repository from `git remote -v`. Use an explicit
 `--repo nt1r/FileHop` when operating outside the clone.
 
-- Read: `gh issue view <number> --comments`
-- Read structured details:
-  `gh issue view <number> --json number,title,body,labels,comments,state`
-- List: `gh issue list --state open --json number,title,labels`
-- Create: `gh issue create --title "..." --body-file <file>`
-- Update body (default): `gh issue edit <number> --body-file <file>`
-- Comment (exceptions above only):
-  `gh issue comment <number> --body-file <file>`
-- Label: `gh issue edit <number> --add-label "..." --remove-label "..."`
-- Close: `gh issue close <number>` (update the body first if a closure
-  summary is needed)
+Use `gh issue edit <number> --body-file <file>` for body-first updates; find other command options through `gh issue --help`. Before closure, update the body if a closure summary is needed.
 
 Use a file or heredoc for multiline bodies rather than interpolating
 untrusted text into shell commands.
@@ -89,9 +79,9 @@ into the default branch without checking acceptance results; leave them open
 until then. For other target branches, carry closing references into the eventual
 PR to the default branch.
 
-## Pull Requests as a Triage Surface
+## Request Intake
 
-**PRs as a request surface: no.**
+Track feature requests and bugs as Issues; use PRs for proposed changes and review.
 
 ## Scope of Setup
 

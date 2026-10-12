@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
-import { ArrowsClockwiseIcon, HardDrivesIcon, InfoIcon, PaperPlaneTiltIcon, WarningCircleIcon } from '@phosphor-icons/react'
-import { Badge } from '@cloudflare/kumo/components/badge'
+import { ArrowsClockwiseIcon, HardDrivesIcon, InfoIcon, WarningCircleIcon } from '@phosphor-icons/react'
 import { Button } from '@cloudflare/kumo/components/button'
 import { LayerCard } from '@cloudflare/kumo/components/layer-card'
 import { Text } from '@cloudflare/kumo/components/text'
 import SessionPage from './Session'
+import brandLogo from './assets/filehop-logo.png'
 
 type State = 'loading' | 'uninitialized' | 'initialized' | 'storage_error' | 'unavailable'
 const messages: Record<State, string> = {
@@ -50,25 +50,11 @@ export default function App() {
 
   return (
     <main className={`app-shell ${isWorkspace ? 'workspace-mode' : 'auth-mode'}`}>
-      {isWorkspace && (
-        <header className="masthead">
-          <div className="brand-lockup">
-            <div className="brand-mark">
-              <div className="brand-icon-mini">
-                <PaperPlaneTiltIcon size={18} weight="fill" />
-              </div>
-              <Text variant="heading" as="h1">FileHop</Text>
-            </div>
-            <Badge variant="secondary">私人工作台</Badge>
-          </div>
-        </header>
-      )}
-
       <div className={isWorkspace ? 'workspace-stage' : 'auth-container'}>
         {!isWorkspace && (
           <div className="auth-brand-header">
             <div className="brand-logo-emblem">
-              <PaperPlaneTiltIcon size={28} weight="fill" />
+              <img src={brandLogo} alt="" width={56} height={56} />
             </div>
             <Text variant="heading" as="h1" size="lg" DANGEROUS_className="auth-brand-title">FileHop</Text>
             <Text variant="secondary" size="sm" DANGEROUS_className="auth-brand-subtitle">

@@ -143,6 +143,10 @@ fn router_inner(database: PathBuf, files: PathBuf, config: Config, recovered: bo
     Router::new()
         .route("/internal/ready", get(readiness))
         .route("/api/session", get(current).post(login).delete(logout))
+        .route(
+            "/api/native/session",
+            get(native_current).post(native_login).delete(native_logout),
+        )
         .route("/api/sends/{send_id}", get(crate::messages::result))
         .route("/api/transfer-limits", get(crate::files::limits))
         .route("/api/file-sends/{send_id}", get(crate::files::send_status))
@@ -311,7 +315,7 @@ async fn logout(State(service): State<Arc<Service>>, headers: HeaderMap) -> Resp
             .flat_map(|h| h.split(';'))
             .filter_map(|part| part.trim().strip_prefix("__Host-filehop="))
         {
-            sqlx::query("DELETE FROM session WHERE digest = ?")
+            sqlx::query("DELETE FROM session WHERE digest = ? AND kind = 'web'")
                 .bind(Sha256::digest(token.as_bytes()).to_vec())
                 .execute(&mut *transaction)
                 .await?;
@@ -335,30 +339,59 @@ async fn logout(State(service): State<Arc<Service>>, headers: HeaderMap) -> Resp
         .into_response()
 }
 
-pub(crate) async fn authenticate(
-    service: &Service,
-    headers: &HeaderMap,
-) -> Result<(SqliteConnection, i64), Box<Response>> {
-    if headers.contains_key(header::AUTHORIZATION) {
-        return Err(Box::new(unauthorized()));
-    }
-    let tokens: Vec<_> = headers
+fn cookies(headers: &HeaderMap) -> Vec<&str> {
+    headers
         .get_all(header::COOKIE)
         .iter()
         .filter_map(|h| h.to_str().ok())
         .flat_map(|h| h.split(';'))
-        .filter_map(|part| part.trim().strip_prefix(&format!("{COOKIE}=")))
-        .collect();
-    if tokens.len() != 1 || tokens[0].len() != 64 {
-        return Err(Box::new(unauthorized()));
-    }
+        .filter_map(|part| part.trim().strip_prefix("__Host-filehop="))
+        .collect()
+}
+
+fn credential(headers: &HeaderMap) -> Option<(&str, &'static str)> {
+    let cookies = cookies(headers);
+    let (token, kind) = if headers.contains_key(header::AUTHORIZATION) {
+        if !cookies.is_empty() || headers.get_all(header::AUTHORIZATION).iter().count() != 1 {
+            return None;
+        }
+        let (scheme, token) = headers
+            .get(header::AUTHORIZATION)?
+            .to_str()
+            .ok()?
+            .split_once(' ')?;
+        if !scheme.eq_ignore_ascii_case("Bearer") {
+            return None;
+        }
+        (token, "native")
+    } else {
+        if cookies.len() != 1 {
+            return None;
+        }
+        (cookies[0], "web")
+    };
+    (token.len() == 64 && token.bytes().all(|b| b.is_ascii_hexdigit())).then_some((token, kind))
+}
+
+// This selects the Origin policy only. Every business handler must also authenticate
+// the selected credential against the persisted session type and expiry.
+pub(crate) fn business_origin_allowed(service: &Service, headers: &HeaderMap) -> bool {
+    matches!(credential(headers), Some((_, "native"))) || write_origin_allowed(service, headers)
+}
+
+pub(crate) async fn authenticate(
+    service: &Service,
+    headers: &HeaderMap,
+) -> Result<(SqliteConnection, i64), Box<Response>> {
+    let (token, kind) = credential(headers).ok_or_else(|| Box::new(unauthorized()))?;
     let mut connection = service.connection().await?;
     let now = (service.config.now)();
     match sqlx::query_scalar::<_, i64>(
-        "SELECT expires_at FROM session WHERE digest = ? AND expires_at > ?",
+        "SELECT expires_at FROM session WHERE digest = ? AND expires_at > ? AND kind = ?",
     )
-    .bind(Sha256::digest(tokens[0].as_bytes()).to_vec())
+    .bind(Sha256::digest(token.as_bytes()).to_vec())
     .bind(now)
+    .bind(kind)
     .fetch_optional(&mut connection)
     .await
     {
@@ -369,6 +402,9 @@ pub(crate) async fn authenticate(
 }
 
 async fn current(State(service): State<Arc<Service>>, headers: HeaderMap) -> Response {
+    if headers.contains_key(header::AUTHORIZATION) {
+        return unauthorized();
+    }
     match authenticate(&service, &headers).await {
         Ok((_, expires)) => session_response(expires, (service.config.now)()),
         Err(response) => *response,
@@ -390,13 +426,71 @@ struct Credentials {
     password: String,
 }
 
+async fn native_current(State(service): State<Arc<Service>>, headers: HeaderMap) -> Response {
+    if !matches!(credential(&headers), Some((_, "native"))) {
+        return unauthorized();
+    }
+    match authenticate(&service, &headers).await {
+        Ok((_, expires)) => session_response(expires, (service.config.now)()),
+        Err(response) => *response,
+    }
+}
+
+async fn native_logout(State(service): State<Arc<Service>>, headers: HeaderMap) -> Response {
+    let Some((token, "native")) = credential(&headers) else {
+        return unauthorized();
+    };
+    let mut connection = match service.connection().await {
+        Ok(c) => c,
+        Err(e) => return *e,
+    };
+    // Also revoke expired tokens; a repeated revocation is harmless.
+    if sqlx::query("DELETE FROM session WHERE digest = ? AND kind = 'native'")
+        .bind(Sha256::digest(token.as_bytes()).to_vec())
+        .execute(&mut connection)
+        .await
+        .is_err()
+    {
+        return unavailable();
+    }
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(serde_json::json!({"state":"logged_out"})),
+    )
+        .into_response()
+}
+
+async fn native_login(
+    State(service): State<Arc<Service>>,
+    peer: Option<axum::Extension<ConnectInfo<SocketAddr>>>,
+    headers: HeaderMap,
+    body: Body,
+) -> Response {
+    if !cookies(&headers).is_empty() {
+        return unauthorized();
+    }
+    login_with_kind(service, peer, headers, body, "native").await
+}
+
 async fn login(
     State(service): State<Arc<Service>>,
     peer: Option<axum::Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     body: Body,
 ) -> Response {
-    if !write_origin_allowed(&service, &headers) {
+    login_with_kind(service, peer, headers, body, "web").await
+}
+
+async fn login_with_kind(
+    service: Arc<Service>,
+    peer: Option<axum::Extension<ConnectInfo<SocketAddr>>>,
+    headers: HeaderMap,
+    body: Body,
+    kind: &'static str,
+) -> Response {
+    if (kind == "web" || headers.contains_key(header::ORIGIN))
+        && !write_origin_allowed(&service, &headers)
+    {
         return error(StatusCode::FORBIDDEN, "origin_rejected", "请求来源不被允许");
     }
     if headers.contains_key(header::AUTHORIZATION) {
@@ -461,7 +555,7 @@ async fn login(
     }
     // 独立任务持有预算到验证真正结束；客户端断开不能提前释放并发槽或漏记失败。
     let task = tokio::spawn(async move {
-        let response = verify_and_create(&service, credentials).await;
+        let response = verify_and_create(&service, credentials, kind).await;
         let mut attempts = service.attempts.lock().unwrap();
         let attempt = attempts.get_mut(&source).unwrap();
         attempt.pending -= 1;
@@ -474,7 +568,7 @@ async fn login(
     task.await.unwrap_or_else(|_| unavailable())
 }
 
-async fn verify_and_create(service: &Service, credentials: Credentials) -> Response {
+async fn verify_and_create(service: &Service, credentials: Credentials, kind: &str) -> Response {
     let mut connection = match service.connection().await {
         Ok(c) => c,
         Err(e) => return *e,
@@ -519,9 +613,10 @@ async fn verify_and_create(service: &Service, credentials: Credentials) -> Respo
             .await?;
         // 验证密码期间管理员可能已经重置。写事务内重新核对所验证的哈希，
         // 防止旧密码验证迟到后又创建逃过全部撤销的新会话。
-        let inserted = sqlx::query("INSERT INTO session (digest, expires_at) SELECT ?, ? FROM account WHERE singleton = 1 AND password_hash = ?")
+        let inserted = sqlx::query("INSERT INTO session (digest, expires_at, kind) SELECT ?, ?, ? FROM account WHERE singleton = 1 AND password_hash = ?")
             .bind(Sha256::digest(token.as_bytes()).to_vec())
             .bind(expires)
+            .bind(kind)
             .bind(verified_hash)
             .execute(&mut *transaction)
             .await?;
@@ -531,6 +626,15 @@ async fn verify_and_create(service: &Service, credentials: Credentials) -> Respo
     .await;
     if result.is_err() {
         return unavailable();
+    }
+    if kind == "native" {
+        return (
+            [(header::CACHE_CONTROL, "no-store")],
+            Json(serde_json::json!({
+                "token": token, "expires_at": expires, "server_time": now
+            })),
+        )
+            .into_response();
     }
     let mut response = session_response(expires, now);
     response.headers_mut().insert(

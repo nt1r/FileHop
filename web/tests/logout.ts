@@ -24,9 +24,11 @@ export async function verifyLogout(page: Page) {
     await held
     await route.fulfill({ response })
   })
+  await sibling.getByRole('button', { name: '用户头像' }).click()
   await sibling.getByRole('button', { name: '检查登录状态' }).click()
   await read
   await page.route('**/api/session', route => route.request().method() === 'DELETE' ? route.abort() : route.continue())
+  await page.getByRole('button', { name: '用户头像' }).click()
   await page.getByRole('button', { name: '退出登录', exact: true }).click()
   for (const tab of [page, sibling]) {
     await expect(tab.getByRole('region', { name: '消息流' })).toHaveCount(0)
@@ -53,6 +55,7 @@ export async function verifyLogout(page: Page) {
     await expect(tab.getByRole('button', { name: '登录', exact: true })).toBeVisible()
     await expect(tab.getByRole('region', { name: '消息流' })).toHaveCount(0)
   }
+  await other.getByRole('button', { name: '用户头像' }).click()
   await other.getByRole('button', { name: '检查登录状态' }).click()
   await expect(other.getByRole('region', { name: '消息流' })).toBeVisible()
   await page.unroute('**/api/session')
@@ -71,6 +74,7 @@ export async function verifyLogout(page: Page) {
     const response = await route.fetch()
     await route.fulfill({ response, status: 502, contentType: 'text/plain', body: 'response lost' })
   })
+  await page.getByRole('button', { name: '用户头像' }).click()
   await page.getByRole('button', { name: '退出登录', exact: true }).click()
   await expect(page.getByRole('button', { name: '重试退出' })).toBeEnabled()
   await expect(sibling.getByRole('status')).toContainText('退出未确认')

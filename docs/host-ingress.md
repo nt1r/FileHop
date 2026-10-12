@@ -5,7 +5,7 @@
 ## 结构
 
 - `deploy/Caddyfile.host`：独立入口全局配置，仅 TCP 443；禁用 HTTP 跳转、HTTP/3 和管理 API，使用 TLS-ALPN-01。
-- `deploy/caddy-dev.routes`：页面/API/WSS 共同 Basic Auth，移除外层 Authorization，覆盖来源头，拒绝内部诊断路径。
+- `deploy/caddy-dev.routes`：页面/源码/WSS 使用 Basic Auth；API 由 FileHop 鉴权，仅移除 Basic 并保留 Bearer，覆盖来源头，拒绝内部诊断路径。
 - `deploy/filehop-caddy.service`：独立非 root 服务账户及证书目录，仅授予绑定低端口能力，不打印环境变量。
 - `deploy/compose.host.yml`：为开发前后端设置专用网络固定地址，不发布应用端口。
 
@@ -23,7 +23,7 @@
 - `FILEHOP_DEV_USER`、`FILEHOP_DEV_PASSWORD_HASH`：独立外层凭证，与应用账户不同。
 - `FILEHOP_BACKEND_UPSTREAM`、`FILEHOP_WEB_UPSTREAM`：各服务的固定内部地址与端口。
 
-环境文件只允许管理员和入口服务读取。通过隐藏交互或 stdin 生成密码哈希，不在命令行参数、聊天、日志或 Git 中放真实凭证。首次对外开放前必须先落实认证、完成配置校验。证书和自动保存配置也应受访问权限保护。
+环境文件只允许管理员和入口服务读取。通过隐藏交互或 stdin 生成密码哈希，不在命令行参数、聊天、日志或 Git 中放真实凭证。首次对外开放前必须先落实认证、完成配置校验。API 直接面对公网，由后端执行业务鉴权、登录节流及资源限制；不能将 API 放行规则扩展到开发页面或源码。证书和自动保存配置也应受访问权限保护。
 
 ## 运行
 

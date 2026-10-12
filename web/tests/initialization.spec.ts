@@ -10,8 +10,6 @@ import { verifySendRecovery } from './send-recovery'
 import { verifyFiles } from './files'
 import { verifyFileSession } from './file-session'
 import { verifyFileLogout } from './file-logout'
-import { verifyServerFiles } from './server-files'
-import { verifyDeletion } from './deletion'
 
 test('administrator initializes storage and the page observes the real status', async ({ page }) => {
   test.setTimeout(150_000)
@@ -42,6 +40,7 @@ test('administrator initializes storage and the page observes the real status', 
   await expect(page.getByRole('region', { name: '消息流' })).toBeVisible()
 
   await page.route('**/api/session', route => route.fulfill({ status: 401, contentType: 'text/html', body: 'Access gate' }))
+  await page.getByRole('button', { name: '用户头像' }).click()
   await page.getByRole('button', { name: '检查登录状态' }).click()
   await expect(page.getByRole('status')).toContainText('无法确认登录状态')
   await expect(page.getByRole('region', { name: '消息流' })).toBeVisible()
@@ -58,6 +57,7 @@ test('administrator initializes storage and the page observes the real status', 
     await held
     await route.fulfill({ response })
   })
+  await page.getByRole('button', { name: '用户头像' }).click()
   await page.getByRole('button', { name: '检查登录状态' }).click()
   await arrived
   await page.clock.fastForward(10_000)
@@ -91,8 +91,6 @@ test('administrator initializes storage and the page observes the real status', 
   await verifyFileSession(page)
   await verifyFileLogout(page)
   await verifyFiles(page)
-  await verifyServerFiles(page)
-  await verifyDeletion(page)
   await verifyLogout(page)
   writeFileSync(resolve(process.env.TEST_FILES!, 'storage-id'), 'mismatched')
   await page.reload()

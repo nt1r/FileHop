@@ -79,7 +79,7 @@ test('only the files page deletes and completion requires manual refresh', async
   await filesPage(page)
   await expect(page.getByRole('button', { name: '刷新文件列表' })).toBeEnabled()
   const usage = page.getByRole('region', { name: '应用文件额度', exact: true })
-  await expect(usage).toContainText('已保存文件：3 字节')
+  await expect(usage).toContainText('已保存文件：3 B')
   const id = (await row(page, name).getByRole('link').getAttribute('href'))!.split('/').at(-1)!
   let reads = 0
   page.on('request', request => {
@@ -92,10 +92,10 @@ test('only the files page deletes and completion requires manual refresh', async
   await page.clock.runFor(10000)
   expect(reads).toBe(0)
   await expect(row(page, name)).toContainText('删除处理中，空间尚未释放')
-  await expect(usage).toContainText('已保存文件：3 字节')
+  await expect(usage).toContainText('已保存文件：3 B')
   await page.getByRole('button', { name: '刷新文件列表' }).click()
   await expect(row(page, name)).toHaveCount(0)
-  await expect(usage).toContainText('已保存文件：0 字节')
+  await expect(usage).toContainText('已保存文件：0 B')
   await messagesPage(page)
   await expectDeleted(page, name)
 })

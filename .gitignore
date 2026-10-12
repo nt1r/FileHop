@@ -21,3 +21,12 @@
 **/test-results/
 **/playwright-report/
 **/__pycache__/
+
+# Android local configuration, build output and signing material
+**/.gradle/
+**/.kotlin/
+/android/**/build/
+/android/local.properties
+*.jks
+*.keystore
+.idea/

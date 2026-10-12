@@ -10,7 +10,7 @@
 
 每版按 [公开内容清单](../CONTRIBUTING.md#public-content-checklist) 核对代码及完整历史、构建上下文、依赖许可和必要声明。镜像包含 `/licenses`，Release 包含 Apache-2.0 LICENSE 和依赖声明归档；后端归档还包含基础系统 `/usr/share/doc`。文件收集不是法律兼容性判定，缺少的依赖声明或其他分发义务应先处理。确认后，由获授权操作者将仓库 Actions variable `FILEHOP_PUBLICATION_APPROVED_SHA` 设置为此次 main 的完整提交 SHA；此值不是秘密，不复用到别的提交。
 
-创建 tag 前完成发布 PR 的完整检查。推送 tag 后 workflow 验证身份、构建 ARM64 镜像，运行目标产物隔离启动、迁移互斥和数据保留冒烟；存在正式旧 Release 时从最近发布后端种数据并由目标镜像迁移。当前没有旧发布结构，不新增空迁移或声称跨结构升级已验。
+创建 tag 前完成发布 PR 的完整检查。推送 tag 后 workflow 验证身份、构建 ARM64 镜像，运行目标产物隔离启动、迁移互斥和数据保留冒烟；存在正式旧 Release 时从最近发布后端种数据并由目标镜像迁移。首次发布只验证初始化；存在旧发布时验证最近实际发布到目标版本的数据保留与必要升级，不为验证增加空迁移。
 
 检查通过后先保留 draft Release，再推送唯一构建标签，以 digest 记录产物。**已有 Release（含 draft）拒绝覆盖**。公开包后必须用空 Docker 凭证目录匿名拉取成功，才上传完整附件并发布 Release。首次 GHCR 包通常需要另行授权改为 public；若因此失败，保留 draft 和镜像，操作者核查后手动完成该版本或放弃它并选择新版本，不盲目重新运行、不自动删除 draft 或覆盖旧版本。
 
@@ -27,11 +27,15 @@ Release 附件：
 
 宿主需要 Linux、Docker Compose、Node（使用仓库 `.nvmrc`）、`gh`、curl、util-linux `flock`。生产使用固定受信工具源码，不从 Release 下载执行脚本。`gh` 下载公开 Release 所需的本地认证不传进容器。
 
-按[生产运行基础](development.md#隔离生产形态运行)准备独立的绝对数据库、文件目录、专用网络、UID/GID 10001 权限和存储初始化；首次安装使用目标 digest 镜像的 `init`，不是 `migrate`。网络须支持显式固定后端 IPv4，宿主 Caddy 通过该地址的 8080 访问，后端不发布端口。容器入口如需改为固定地址也必须单独授权，不让脚本修改共享入口。
+参考 [`deploy/production.env.example`](../deploy/production.env.example) 准备仓库外的实际配置，显式填写项目名、目标后端 digest、精确 HTTPS Origin、可信代理 IP、专用网络和两个绝对挂载目录。目录须已存在、彼此独立且由 UID/GID 10001 可写；不与开发数据或网络混用。网络须支持固定后端 IPv4，宿主 Caddy 通过该地址的 8080 访问，后端不发布端口。容器入口的网络调整同样须单独授权。
+
+使用 [`deploy/compose.production.yml`](../deploy/compose.production.yml)，显式传入 `--env-file`、`--project-directory`、`-p`、`-f` 及固定地址 overlay，先 `config --quiet` 校验，初始化和启动按下节顺序进行。已有实例使用目标镜像迁移，不重复初始化。
+
+缺失 bind source 由 Compose 拒绝创建；`serve --require-initialized` 对空、部分初始化或错配目录拒绝启动。发生重启循环时先停止并查挂载与日志，不清库或反复初始化。应用重启策略和停止等待时间以 Compose 配置为准；进程退出才触发重启策略，`unhealthy` 不会自动重启。
 
 复制 `deploy/update.example.json` 到仓库外固定配置目录，例如 `/srv/filehop-production/production.json`，逐项核对；数据目录和静态版本根目录必须存在、互不相同且不嵌套。静态根目录只放静态版本和 `current` 符号链接，不放数据库或上传目录。配置目录应仅允许运维用户写入；它将保存目标 Compose 和当前版本记录。实际地址、配置、日志与数据不提交 Git。
 
-首次提取目标静态镜像 `/web` 到 `web/<version>`，通过 `web/current` 链接提供完整静态目录；让 Caddy 的 `FILEHOP_PROD_WEB_ROOT` 始终指向这个链接。首次后端用 `deploy/compose.production.yml` 和明确 env-file 初始化、启动，另加固定 `ipv4_address` overlay，并保持与 JSON 中的项目、网络、挂载、Origin、代理地址相同。先通过真实 HTTPS 日常路径再开始使用更新工具；更新入口不会替已有/损坏实例重新初始化。
+静态镜像没有运行服务或默认命令；通过 `docker create <目标静态镜像 digest> /unused` 建立停止的提取容器，`docker cp` 提取 `/web` 后移除提取容器，不用 `docker run` 启动它。首次提取到 `web/<version>`，通过 `web/current` 链接提供完整静态目录；让 Caddy 的 `FILEHOP_PROD_WEB_ROOT` 始终指向这个链接。后端 Compose、env-file 和固定 `ipv4_address` overlay 须与 JSON 中的项目、网络、挂载、Origin、代理地址一致。先通过真实 HTTPS 日常路径再开始使用更新工具；更新入口不会替已有/损坏实例重新初始化。
 
 Caddy 须加载 `deploy/caddy-production.routes` 中对 `/`、`/login`、`/files` 的页面回退规则。已有入口首次接入这些路由时，须另行授权更新并重载实际入口配置；更新脚本不会安装或修改共享 Caddy，仅更新前端制品不能让旧入口支持子路径。
 
@@ -44,7 +48,7 @@ Caddy 须加载 `deploy/caddy-production.routes` 中对 `/`、`/login`、`/files
 首次接入按以下顺序检查；实际主机配置、凭证和原始日志留在仓库外：
 
 1. **确认目标和隔离**：核对正式 Origin、同版镜像标签中的 Git SHA、专用网络及数据库／文件目录。生产没有开发 Basic Auth，后端没有宿主端口映射；Caddy 只能读取静态资源，不能读取数据库或文件目录。
-2. **初始化账户**：操作者在真实终端执行目标镜像的 `init`，自行输入用户名和隐藏密码。不要使用自动化测试账户初始化生产，也不要把密码放在参数、环境配置、聊天或记录中。已有实例不得重新初始化。
+2. **初始化并启动**：沿用上节核对的一组 Compose 参数，仅对全新目录执行 `run --rm backend init --username your_admin --confirm-paths`，替换用户名并在真实终端隐藏输入密码，成功后 `up -d --no-build`。不要使用自动化测试账户初始化生产，也不要把密码放在参数、环境配置、聊天或记录中。已有实例不得重新初始化。
 3. **检查入口**：校验配置后应用 Caddy 路由，使用受信任 HTTPS 请求 `/`、`/login`、`/files` 和 `/api/status`；前三项须是目标版本页面，状态须为 `initialized`。未登录的消息／文件接口应拒绝访问，`/internal/ready` 应为 404。开发入口仍须返回外层认证挑战。检查证书持久目录和 TLS-ALPN-01 配置；首次成功签发不等于实测自动续签。
 4. **核对网络边界**：核对云入站规则和实际外部可达性，Web 只开放 TCP 443，不开放 80 或后端端口；保留既有管理入口。本机请求或监听检查不能单独证明公网规则正确，无法检查的部分明确留待确认。
 5. **用户实际使用**：在稳定版桌面 Chrome 登录，发送一条可保留的验收文本，上传一个不含隐私的小文件并下载核对内容。保存草稿、结束传输后保留挂载重建后端；重新打开页面，确认文本和文件仍在、文件仍可下载。最后只删除这个验收服务器文件，手动刷新确认删除完成、历史保留且本地副本不变。生产不执行填盘、强杀或删除真实内容的故障演练。
@@ -68,6 +72,23 @@ FILEHOP_CONFIRM_STOP=yes node scripts/update.mjs update /srv/filehop-production/
 更新生成 `<配置目录>/target.compose.json`，不继承 shell `COMPOSE_*`、工作目录 `.env` 或开发挂载。以后对该生产栈的查询/启停使用这个文件，不再使用残留的旧镜像配置。内部就绪最多等待 60 秒，并检查 HTTPS `/api/status` 以及 `/`、`/login`、`/files` 的内容均与目标 index 一致；任一路径请求失败或返回错误内容都判定冒烟失败，并提示核查已安装的 Caddy 页面路由；之后才原子记录 `current-release.json`。脚本不保存凭证或做认证业务写入，操作者仍须刷新页面并走一次登录、文本、上传下载/删除的日常路径。迁移成功前，目标配置保存在配置目录的 `pending-<版本>-<进程>.compose.json`，不会覆盖日常使用的 `target.compose.json`；成功后才原子替换运行配置。失败保留 pending 文件供排障，不直接用它启动服务。
 
 前端完整提取后才切换，不暴露半套资源。已有目标版本目录拒绝覆盖（包括失败残留），更新并不是可恢复状态机。不得手动删除目录后无脑重跑；先调查实际镜像、结构、资源和运行状态，再明确下一步。
+
+## 迁移与内部检查
+
+正常更新由上节脚本执行迁移。需要独立调用时，先核对可信目标 digest、两个绝对目录、UID/GID 和存储身份，结束传输并停止所有旧写入者；生产操作须另行授权。以下变量由操作者明确设置，目录必须已存在：
+
+```bash
+docker run --rm --network none --user "$FILEHOP_UID:$FILEHOP_GID" \
+  --mount "type=bind,src=$DATABASE_DIR,dst=/data/database" \
+  --mount "type=bind,src=$FILES_DIR,dst=/data/files" \
+  "$TARGET_BACKEND_IMAGE" migrate
+```
+
+成功退出 0 并输出 `Migration completed.`，仅升级结构，不创建账户或执行文件恢复。后端、密码重置与迁移不能并发写同一实例；锁随进程退出释放，不删除身份文件来解锁。缺库、身份或账户异常、迁移历史缺失及 checksum／dirty／未知版本均拒绝，处理原则见[迁移维护规则](../backend/migrations/README.md)。失败停止后续更新，不启动旧版本写入可能已改变的结构，不自动重试或假定所有失败都能事务回滚。
+
+迁移成功后用同一目标镜像和挂载启动，通过获授权的宿主或受控内部网络检查 `/internal/ready`。`/internal/live` 只证明进程响应，`/api/status` 只描述初始化状态，均不能替代就绪。精确响应契约见 [Spec 004](specs/004-web-production-deployment.md#内部检查契约)。检查为瞬时状态，仍须验证真实业务。
+
+Caddy 必须拒绝 `/internal/*`；镜像不含 curl，探测从受控宿主进行，不为检查安装生产调试工具或开放公网端口。CLI 完成文件恢复后才监听，恢复期连接失败不表示已就绪；已有删除清理不阻断其他可用额度。
 
 ## 版本、日志、密码和排障
 

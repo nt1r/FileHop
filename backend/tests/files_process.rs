@@ -1,5 +1,5 @@
 use std::{
-    io::{BufRead, BufReader, Read, Write},
+    io::{BufRead, BufReader, Read, Seek, Write},
     net::{SocketAddr, TcpStream},
     process::{Child, Command, Stdio},
     time::Duration,
@@ -16,6 +16,8 @@ impl Drop for Server {
     }
 }
 fn start(database: &std::path::Path, files: &std::path::Path) -> (Server, SocketAddr) {
+    // Isolated synthetic instance only; retain bounded startup evidence on failure.
+    let mut errors = tempfile::tempfile().unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_backend"))
         .args([
             "--database-dir",
@@ -27,7 +29,7 @@ fn start(database: &std::path::Path, files: &std::path::Path) -> (Server, Socket
             "127.0.0.1:0",
         ])
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::from(errors.try_clone().unwrap()))
         .spawn()
         .unwrap();
     let output = child.stdout.take().unwrap();
@@ -40,12 +42,17 @@ fn start(database: &std::path::Path, files: &std::path::Path) -> (Server, Socket
             }
         }
     });
-    let server = Server(child);
-    (
-        server,
-        rx.recv_timeout(Duration::from_secs(15))
-            .expect("recovery before listen"),
-    )
+    let mut server = Server(child);
+    let address = rx
+        .recv_timeout(Duration::from_secs(15))
+        .unwrap_or_else(|error| {
+            let status = server.0.try_wait().unwrap();
+            errors.rewind().unwrap();
+            let mut stderr = String::new();
+            errors.take(8192).read_to_string(&mut stderr).unwrap();
+            panic!("recovery before listen: {error}; exit={status:?}; stderr={stderr}");
+        });
+    (server, address)
 }
 fn http(address: SocketAddr, method: &str, path: &str, cookie: &str, body: &str) -> (u16, String) {
     let mut socket = TcpStream::connect_timeout(&address, Duration::from_secs(5)).unwrap();

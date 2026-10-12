@@ -24,7 +24,9 @@ export async function verifySendRecovery(page: Page) {
     await draft.fill(text)
     await send.click()
     await expect(page.getByText('结果未确认：', { exact: false })).toBeVisible()
+    await page.getByRole('button', { name: '用户头像' }).click()
     await page.getByLabel('来源标签').fill('Changed after send')
+    await page.keyboard.press('Escape')
     await action.click()
     await expect(draft).toHaveValue('')
     await page.getByRole('button', { name: '读取最近消息' }).click()
@@ -74,7 +76,9 @@ async function verifyUncommittedRecovery(page: Page) {
     await expect(draft).toHaveAttribute('readonly', '')
   }
   rejection = 0
+  await page.getByRole('button', { name: '用户头像' }).click()
   await page.getByLabel('来源标签').fill('Later label')
+  await page.keyboard.press('Escape')
   await page.getByRole('button', { name: '同次重试' }).click()
   await expect(draft).toHaveValue('')
   await expect(page.getByRole('article').filter({ hasText: 'identity survives login and rejected retries' })).toHaveCount(1)

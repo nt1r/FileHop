@@ -1,7 +1,7 @@
 @import '@cloudflare/kumo/styles/standalone';
+@import './theme.css';
 
 :root {
-  color-scheme: light;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
@@ -9,12 +9,11 @@
 body {
   margin: 0;
   min-height: 100vh;
-  color: var(--color-kumo-default, #18181b);
-  background:
-    radial-gradient(ellipse at 50% -8%, color-mix(in srgb, var(--color-kumo-brand) 16%, transparent), transparent 38rem),
-    linear-gradient(180deg, var(--color-kumo-canvas) 0%, color-mix(in srgb, var(--color-kumo-elevated) 65%, var(--color-kumo-canvas)) 100%);
+  color: var(--text-color-kumo-default);
+  background: var(--color-kumo-canvas);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
 #root { isolation: isolate; }
@@ -26,7 +25,7 @@ body {
 }
 
 /* ==========================================================================
-   Authentication layout (Centered hero presentation)
+   Authentication layout
    ========================================================================== */
 .app-shell.auth-mode {
   display: flex;
@@ -65,16 +64,21 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 54px;
-  height: 54px;
+  width: 56px;
+  height: 56px;
   border-radius: 16px;
-  background: linear-gradient(135deg, #f6821f 0%, #fa8c16 55%, #e65a00 100%);
-  color: #ffffff;
-  box-shadow:
-    0 4px 14px 0 color-mix(in srgb, var(--color-kumo-brand) 38%, transparent),
-    inset 0 1px 1px 0 rgba(255, 255, 255, 0.4);
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: var(--color-kumo-base);
+  box-shadow: 0 2px 6px var(--color-kumo-shadow-drop);
+  border: 1px solid var(--color-kumo-line);
   margin-bottom: 0.25rem;
+}
+
+.brand-logo-emblem img,
+.brand-icon-mini img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .auth-brand-title {
@@ -82,26 +86,23 @@ body {
   font-weight: 700;
   letter-spacing: -0.035em;
   margin: 0;
-  color: var(--color-kumo-contrast, #09090b);
+  color: var(--text-color-kumo-strong);
 }
 
 .auth-brand-subtitle {
   margin: 0;
   font-size: 0.875rem;
-  color: var(--text-color-kumo-subtle, #71717a);
+  color: var(--text-color-kumo-subtle);
 }
 
 .auth-card {
   width: 100%;
   box-sizing: border-box;
   padding: 2rem;
-  border-radius: 1.25rem;
-  border: 1px solid color-mix(in srgb, var(--color-kumo-contrast) 8%, transparent);
-  background: var(--color-kumo-base, #ffffff);
-  box-shadow:
-    0 1px 2px 0 rgba(0, 0, 0, 0.04),
-    0 10px 28px -4px rgba(0, 0, 0, 0.06),
-    0 20px 48px -12px color-mix(in srgb, var(--color-kumo-brand) 8%, transparent);
+  border-radius: 1.5rem;
+  border: 1px solid var(--color-kumo-line);
+  background: var(--color-kumo-base);
+  box-shadow: 0 4px 16px var(--color-kumo-shadow-drop);
   display: grid;
   gap: 1.25rem;
 }
@@ -129,21 +130,21 @@ body {
 }
 
 .auth-status-callout.error {
-  background: color-mix(in srgb, var(--text-color-kumo-danger, #ef4444) 7%, var(--color-kumo-base, #ffffff));
-  border-color: color-mix(in srgb, var(--text-color-kumo-danger, #ef4444) 24%, transparent);
-  color: var(--text-color-kumo-danger, #b91c1c);
+  background: var(--color-kumo-danger-tint);
+  border-color: var(--fh-danger-line);
+  color: var(--text-color-kumo-danger);
 }
 
 .auth-status-callout.warning {
-  background: color-mix(in srgb, #f59e0b 8%, var(--color-kumo-base, #ffffff));
-  border-color: color-mix(in srgb, #f59e0b 28%, transparent);
-  color: #b45309;
+  background: var(--color-kumo-warning-tint);
+  border-color: var(--fh-warning-line);
+  color: var(--text-color-kumo-warning);
 }
 
 .auth-status-callout.info {
-  background: color-mix(in srgb, var(--color-kumo-brand) 7%, var(--color-kumo-base, #ffffff));
-  border-color: color-mix(in srgb, var(--color-kumo-brand) 24%, transparent);
-  color: var(--color-kumo-default, #27272a);
+  background: var(--fh-accent-tint);
+  border-color: var(--fh-accent-line);
+  color: var(--text-color-kumo-info);
 }
 
 .auth-status-callout [role="status"] {
@@ -175,13 +176,11 @@ body {
   font-size: 0.95rem;
   font-weight: 600;
   border-radius: 0.75rem;
-  box-shadow: 0 2px 8px 0 color-mix(in srgb, var(--color-kumo-brand) 30%, transparent);
   transition: transform 0.1s ease, box-shadow 0.15s ease;
 }
 
 .login-submit-btn:not(:disabled):hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px 0 color-mix(in srgb, var(--color-kumo-brand) 40%, transparent);
 }
 
 .login-submit-btn:not(:disabled):active {
@@ -190,7 +189,7 @@ body {
 
 .auth-card-footer {
   padding-top: 0.65rem;
-  border-top: 1px solid color-mix(in srgb, var(--color-kumo-contrast) 6%, transparent);
+  border-top: 1px solid var(--color-kumo-line);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -201,7 +200,7 @@ body {
   align-items: center;
   gap: 0.45rem;
   font-size: 0.775rem;
-  color: var(--text-color-kumo-subtle, #71717a);
+  color: var(--text-color-kumo-subtle);
 }
 
 .auth-footer {
@@ -212,7 +211,7 @@ body {
 .auth-footer p {
   margin: 0;
   font-size: 0.8rem;
-  color: var(--text-color-kumo-subtle, #71717a);
+  color: var(--text-color-kumo-subtle);
 }
 
 .auth-guide-text {
@@ -220,19 +219,18 @@ body {
 }
 
 /* ==========================================================================
-   Workspace layout (Full desktop workspace)
+   Workspace layout
    ========================================================================== */
 .app-shell.workspace-mode {
   box-sizing: border-box;
-  width: min(1080px, calc(100% - 3rem));
+  width: min(1040px, calc(100% - 2.5rem));
   margin: 0 auto;
-  padding: 2rem 0 3rem;
+  padding: 1rem 0 1rem;
 }
 
 .workspace-stage {
   display: grid;
-  gap: 1.5rem;
-  margin-top: 1.25rem;
+  gap: 1.25rem;
 }
 
 .brand-lockup {
@@ -253,24 +251,233 @@ body {
   justify-content: center;
   width: 32px;
   height: 32px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #f6821f 0%, #fa8c16 100%);
-  color: #ffffff;
-  box-shadow: 0 2px 6px 0 color-mix(in srgb, var(--color-kumo-brand) 30%, transparent);
+  border-radius: 10px;
+  background: var(--color-kumo-base);
+  box-shadow: 0 2px 6px 0 var(--color-kumo-shadow-drop);
 }
 
-.text-brand { color: var(--color-kumo-brand, #f6821f); }
-.text-danger { color: var(--text-color-kumo-danger, #ef4444); }
+.brand-title {
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  color: var(--text-color-kumo-strong);
+}
 
-.masthead, .panel-heading, .composer-heading, .action-row {
+.text-brand { color: var(--color-kumo-brand); }
+.text-danger { color: var(--text-color-kumo-danger); }
+
+.workspace-header-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1.5rem;
+  padding: 0.25rem 0 0.5rem;
+  border-bottom: 1px solid var(--color-kumo-line);
+  margin-bottom: 0.25rem;
 }
 
-.workspace-header {
-  padding-bottom: 0.25rem;
+.workspace-nav-left {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.workspace-tab-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.4rem;
+  border-radius: 9999px;
+  background: var(--color-kumo-fill);
+}
+
+.workspace-tab-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 1.15rem;
+  border-radius: 9999px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-color-kumo-subtle);
+  text-decoration: none;
+  background: transparent;
+  transition: all 0.15s ease-in-out;
+  cursor: pointer;
+  user-select: none;
+}
+
+.workspace-tab-link:hover {
+  color: var(--text-color-kumo-strong);
+  background: var(--color-kumo-tint);
+}
+
+.workspace-tab-link.active {
+  color: var(--text-color-kumo-link);
+  background: var(--fh-accent-tint);
+  font-weight: 600;
+  box-shadow: 0 1px 3px var(--color-kumo-shadow-drop);
+}
+
+.workspace-tab-link.active svg {
+  color: inherit;
+}
+
+.workspace-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.user-avatar-menu-wrapper {
+  position: relative;
+  display: inline-flex;
+}
+
+.user-avatar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 9999px;
+  transition: transform 0.15s ease;
+}
+
+.user-avatar-btn:hover {
+  transform: scale(1.04);
+}
+
+.user-avatar-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--fh-focus-ring);
+  border-radius: 9999px;
+}
+
+.user-avatar-caret {
+  color: var(--text-color-kumo-subtle);
+  transition: transform 0.15s ease;
+}
+
+.user-avatar-circle {
+  border-radius: 50%;
+  overflow: hidden;
+  border: 2px solid var(--color-kumo-base);
+  box-shadow: 0 1px 3px var(--color-kumo-shadow-drop), inset 0 0 0 1px var(--color-kumo-shadow-drop);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  user-select: none;
+  font-weight: 700;
+  line-height: 1;
+  background: var(--fh-source-strong);
+  color: var(--color-white);
+}
+
+.user-avatar-initial {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  line-height: 1;
+}
+
+.user-menu-popover {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 100;
+  width: 260px;
+  padding: 1.15rem;
+  border-radius: 1.25rem;
+  background: var(--color-kumo-base);
+  border: 1px solid var(--color-kumo-line);
+  box-shadow:
+    0 16px 40px -4px var(--color-kumo-shadow-drop),
+    0 4px 12px -2px var(--color-kumo-shadow-drop);
+  display: none;
+  flex-direction: column;
+  gap: 0.85rem;
+  animation: menuFadeIn 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.user-menu-popover.open {
+  display: flex;
+}
+
+@keyframes menuFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.user-menu-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.user-menu-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.user-menu-meta-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.user-menu-meta h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-color-kumo-strong);
+}
+
+.user-menu-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.user-menu-divider {
+  height: 1px;
+  background: var(--color-kumo-tint);
+  margin: 0.1rem -0.25rem;
+}
+
+.user-menu-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.user-menu-item-btn {
+  width: 100%;
+  justify-content: flex-start;
+  border-radius: 0.55rem;
+  padding: 0.45rem 0.65rem;
+  font-size: 0.875rem;
+  color: var(--text-color-kumo-default);
+}
+
+.user-menu-item-btn:hover {
+  background: var(--color-kumo-tint);
+  color: var(--text-color-kumo-strong);
+}
+
+.user-menu-logout-btn {
+  color: var(--text-color-kumo-danger) !important;
+}
+
+.user-menu-logout-btn:hover {
+  background: var(--color-kumo-danger-tint) !important;
+  color: var(--text-color-kumo-danger) !important;
 }
 
 .session-status-badge {
@@ -279,31 +486,14 @@ body {
   gap: 0.5rem;
   padding: 0.35rem 0.85rem;
   border-radius: 9999px;
-  background: color-mix(in srgb, #10b981 8%, var(--color-kumo-base));
-  border: 1px solid color-mix(in srgb, #10b981 22%, transparent);
+  background: var(--fh-accent-tint);
+  border: 1px solid var(--fh-accent-line);
 }
 
-.status-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.status-dot.online {
-  background: #10b981;
-  box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
-}
-
-.workspace-tab-nav {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.35rem;
-  border-radius: 0.85rem;
-  background: color-mix(in srgb, var(--color-kumo-elevated) 80%, var(--color-kumo-canvas));
-  border: 1px solid color-mix(in srgb, var(--color-kumo-contrast) 6%, transparent);
-  margin-bottom: 0.25rem;
+.session-error-badge {
+  background: var(--color-kumo-danger-tint);
+  border-color: var(--fh-danger-line);
+  color: var(--text-color-kumo-danger);
 }
 
 .action-row.centered {
@@ -316,138 +506,271 @@ body {
   justify-content: center;
 }
 
-.workspace { display: grid; gap: 1.25rem; }
+.workspace { display: grid; gap: 1rem; }
 
 .panel {
-  padding: 1.5rem;
-  border-radius: 1.15rem;
-  border: 1px solid color-mix(in srgb, var(--color-kumo-contrast) 7%, transparent);
-  background: var(--color-kumo-base, #ffffff);
-  box-shadow:
-    0 1px 3px 0 rgba(0, 0, 0, 0.03),
-    0 6px 16px -4px rgba(0, 0, 0, 0.04);
+  padding: 1.75rem 2rem;
+  border-radius: 1.5rem;
+  border: 1px solid var(--color-kumo-line);
+  background: var(--color-kumo-base);
+  box-shadow: 0 4px 20px -2px var(--color-kumo-shadow-drop);
 }
-
-.status-panel, .composer { display: grid; gap: 1.15rem; }
 
 /* ==========================================================================
-   Messages Stream Page
+   Chat Dialog Window (IM / Messenger Layout)
    ========================================================================== */
-.stream { display: grid; gap: 1.25rem; }
-.stream-toolbar { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-
-/* 独立阅读区域让分页入口与输入保持可用；禁用浏览器自动锚定，避免与显式位置补偿叠加。 */
-.messages {
-  display: grid;
-  align-content: start;
-  gap: 0.85rem;
-  max-height: min(52vh, 38rem);
-  padding-right: 0.4rem;
-  overflow-y: auto;
-  overflow-anchor: none;
+.stream.chat-window-panel {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 6.25rem);
+  min-height: 440px;
+  padding: 0;
+  border-radius: 1.5rem;
+  border: 1px solid var(--color-kumo-line);
+  background: var(--color-kumo-base);
+  box-shadow: 0 4px 24px -2px var(--color-kumo-shadow-drop);
+  overflow: hidden;
   position: relative;
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--color-kumo-contrast) 20%, transparent) transparent;
 }
 
-.messages::-webkit-scrollbar {
-  width: 6px;
-}
-
-.messages::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--color-kumo-contrast) 20%, transparent);
-  border-radius: 9999px;
-}
-
-.message.message-item-card {
-  display: grid;
-  gap: 0.75rem;
-  padding: 1.15rem 1.25rem;
-  border-radius: 0.95rem;
-  border: 1px solid color-mix(in srgb, var(--color-kumo-contrast) 6%, transparent);
-  background: color-mix(in srgb, var(--color-kumo-elevated) 45%, var(--color-kumo-base));
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
-}
-
-.message.message-item-card:hover {
-  border-color: color-mix(in srgb, var(--color-kumo-brand) 25%, transparent);
-  box-shadow: 0 2px 8px -2px rgba(0, 0, 0, 0.04);
-}
-
-.message header {
+.chat-window-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  padding: 0.75rem 1.25rem;
+  background: var(--color-kumo-base);
+  border-bottom: 1px solid var(--color-kumo-hairline);
+  flex-shrink: 0;
 }
 
-.message-source-chip {
-  display: inline-flex;
+.chat-header-status-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.chat-status-indicator {
+  display: flex;
   align-items: center;
   gap: 0.45rem;
-  padding: 0.2rem 0.55rem;
-  border-radius: 0.45rem;
-  background: color-mix(in srgb, var(--color-kumo-contrast) 5%, transparent);
 }
 
-.message-source-icon {
+.chat-status-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-color-kumo-strong);
+}
+
+.chat-status-subtitle {
+  color: var(--text-color-kumo-subtle);
+  font-size: 0.775rem;
+}
+
+.chat-header-actions.stream-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.message-notice-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.45rem 1.25rem;
+  background: var(--color-kumo-recessed);
+  border-bottom: 1px solid var(--color-kumo-hairline);
+  flex-shrink: 0;
+}
+
+.message-notice {
+  line-height: 1.4;
+}
+
+.message-notice p {
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* Messages Viewport */
+.messages.chat-messages-stream {
+  display: grid;
+  align-content: start;
+  gap: 0.85rem;
+  flex: 1;
+  min-height: 0;
+  padding: 1rem 1.25rem;
+  overflow-y: auto;
+  overflow-anchor: none;
+  background: var(--color-kumo-recessed);
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-kumo-interact) transparent;
+  position: relative;
+}
+
+.messages.chat-messages-stream::-webkit-scrollbar {
+  width: 6px;
+}
+
+.messages.chat-messages-stream::-webkit-scrollbar-thumb {
+  background: var(--color-kumo-interact);
+  border-radius: 9999px;
+}
+
+.chat-empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: auto;
+  padding: 3rem 1rem;
   color: var(--text-color-kumo-subtle);
 }
 
-.message-source-label {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--color-kumo-contrast);
-}
-
-.message-body {
-  display: grid;
-  gap: 0.5rem;
-}
-
-.message-text-content {
-  margin: 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.9rem;
-  line-height: 1.55;
-  color: var(--color-kumo-default);
-  background: color-mix(in srgb, var(--color-kumo-base) 80%, var(--color-kumo-canvas));
-  padding: 0.75rem 0.95rem;
-  border-radius: 0.65rem;
-  border: 1px solid color-mix(in srgb, var(--color-kumo-contrast) 5%, transparent);
-}
-
-.message-actions {
+.chat-date-pill-container {
   display: flex;
-  justify-content: flex-end;
+  justify-content: center;
+  margin: 0.25rem 0 0.5rem;
+}
+
+.chat-date-pill {
+  padding: 0.25rem 0.85rem;
+  border-radius: 9999px;
+  background: var(--color-kumo-fill);
+  color: var(--text-color-kumo-subtle);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+/* ==========================================================================
+   Chat Bubble Rows
+   ========================================================================== */
+.chat-message-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  max-width: 80%;
+  position: relative;
+}
+
+.chat-message-avatar {
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+
+.chat-bubble-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+/* --- Incoming (Other Device - Left) --- */
+.chat-row-other {
+  justify-self: start;
+  margin-right: auto;
+  margin-left: 0;
+  flex-direction: row;
+}
+
+.chat-row-other .chat-bubble-container {
+  align-items: flex-start;
+}
+
+.chat-row-other .chat-bubble-header {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.15rem;
+}
+
+.chat-row-other .chat-device-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 9999px;
+  font-size: 0.725rem;
+  font-weight: 600;
+  border: 1px solid var(--fh-source-line);
+  color: var(--fh-source-strong);
+  background: var(--fh-source-tint);
+}
+
+.chat-bubble-body.bubble-other {
+  border-radius: 1.25rem 1.25rem 1.25rem 0.25rem;
+  border: 1px solid var(--fh-source-line);
+  background: var(--fh-source-surface);
+  padding: 0.85rem 1.15rem;
+  box-shadow: 0 1px 3px 0 var(--color-kumo-shadow-drop);
+  color: var(--text-color-kumo-default);
+}
+
+.chat-bubble-body.bubble-other pre.message-text-content {
+  color: inherit;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font-family: inherit;
+  font-size: 0.95rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* --- Outgoing (Self Device - Right) --- */
+.chat-row-self {
+  justify-self: end;
+  margin-left: auto;
+  margin-right: 0;
+  flex-direction: row;
+}
+
+.chat-row-self .chat-bubble-container {
+  align-items: flex-end;
+}
+
+.chat-bubble-body.bubble-self {
+  background: var(--fh-source-strong);
+  color: var(--color-white);
+  border: none;
+  border-radius: 1.25rem 1.25rem 0.25rem 1.25rem;
+  padding: 0.85rem 1.15rem;
+  box-shadow: 0 2px 10px 0 var(--color-kumo-shadow-drop);
+}
+
+.chat-bubble-body.bubble-self pre.message-text-content {
+  color: var(--color-white);
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font-family: inherit;
+  font-size: 0.95rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* File messages use a neutral surface regardless of source color. */
+.chat-bubble-body.bubble-file-card {
+  background: var(--color-kumo-base);
+  color: var(--text-color-kumo-default);
+  border: 1px solid var(--color-kumo-line);
+  box-shadow: 0 2px 8px var(--color-kumo-shadow-drop) !important;
+  padding: 0.75rem 0.95rem !important;
+  border-radius: 1.15rem !important;
 }
 
 .file-message-card {
   display: flex;
   align-items: center;
-  gap: 1rem;
-  padding: 0.85rem 1rem;
-  border-radius: 0.75rem;
-  background: color-mix(in srgb, var(--color-kumo-brand) 4%, var(--color-kumo-base));
-  border: 1px solid color-mix(in srgb, var(--color-kumo-brand) 18%, transparent);
-}
-
-.file-message-icon-box {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--color-kumo-brand) 12%, transparent);
-  flex-shrink: 0;
+  gap: 0.85rem;
 }
 
 .file-message-details {
-  display: grid;
-  gap: 0.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
   flex: 1;
   min-width: 0;
 }
@@ -455,14 +778,22 @@ body {
 .file-message-meta {
   font-weight: 600;
   font-size: 0.925rem;
-  color: var(--color-kumo-contrast);
+  color: var(--text-color-kumo-strong);
   word-break: break-all;
+  margin: 0;
+}
+
+.file-message-size {
+  color: var(--text-color-kumo-subtle);
+  font-size: 0.775rem;
+  margin: 0;
 }
 
 .file-message-status-row {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.65rem;
+  margin-top: 0.25rem;
   flex-wrap: wrap;
 }
 
@@ -472,31 +803,73 @@ body {
   gap: 0.35rem;
   font-size: 0.825rem;
   font-weight: 500;
-  color: var(--color-kumo-brand, #f6821f);
+  color: var(--text-color-kumo-link);
   text-decoration: none;
-  padding: 0.25rem 0.65rem;
-  border-radius: 0.5rem;
-  background: color-mix(in srgb, var(--color-kumo-brand) 10%, transparent);
+  padding: 0.2rem 0.6rem;
+  border-radius: 0.45rem;
+  background: var(--fh-accent-tint);
   transition: background 0.15s ease;
 }
 
 .file-download-link:hover {
-  background: color-mix(in srgb, var(--color-kumo-brand) 18%, transparent);
+  background: var(--fh-accent-hover);
 }
 
-.message-notice { min-height: 1.7em; }
+.chat-bubble-footer {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.2rem;
+  padding: 0 0.25rem;
+}
+
+.chat-row-self .chat-bubble-footer {
+  justify-content: flex-end;
+}
+
+.chat-bubble-footer time {
+  font-size: 0.75rem;
+  color: var(--text-color-kumo-subtle);
+}
+
+.btn-copy-bubble {
+  height: 22px !important;
+  padding: 0 0.4rem !important;
+  font-size: 0.75rem !important;
+  color: var(--text-color-kumo-subtle) !important;
+}
+
+.btn-copy-bubble:hover {
+  color: var(--color-kumo-brand) !important;
+}
 
 /* ==========================================================================
-   File Exchange Panel
+   Dock Tray (Upload Tasks, Warnings, and Send Recovery)
    ========================================================================== */
-.upload-panel { display: grid; gap: 1rem; }
-.file-picker { display: none; }
+.chat-dock-tray {
+  max-height: 35vh;
+  overflow-y: auto;
+  padding: 0.75rem 1.25rem;
+  background: var(--color-kumo-recessed);
+  border-top: 1px solid var(--color-kumo-hairline);
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  flex-shrink: 0;
+}
+
+.upload-feedback {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  min-height: 0;
+}
 
 .upload-tip-box {
-  padding: 0.75rem 1rem;
-  border-radius: 0.75rem;
-  background: color-mix(in srgb, var(--color-kumo-contrast) 3%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-kumo-contrast) 6%, transparent);
+  padding: 0.6rem 0.85rem;
+  border-radius: 0.65rem;
+  background: var(--color-kumo-base);
+  border: 1px solid var(--color-kumo-line);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -504,111 +877,250 @@ body {
 }
 
 .upload-paused-banner {
-  padding: 0.75rem 1rem;
-  border-radius: 0.75rem;
-  background: color-mix(in srgb, #f59e0b 8%, transparent);
-  border: 1px solid color-mix(in srgb, #f59e0b 25%, transparent);
-  color: #b45309;
+  padding: 0.65rem 0.85rem;
+  border-radius: 0.65rem;
+  background: var(--color-kumo-warning-tint);
+  border: 1px solid var(--fh-warning-line);
+  color: var(--text-color-kumo-warning);
+}
+
+.upload-tasks-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
 }
 
 .upload-batch-toolbar {
   display: flex;
-  justify-content: flex-end;
-  padding-top: 0.25rem;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 0.2rem;
+}
+
+.upload-queue-count {
+  font-size: 0.825rem;
+  font-weight: 600;
+  color: var(--text-color-kumo-subtle);
+}
+
+.upload-tasks-list {
+  display: grid;
+  gap: 0.45rem;
+  max-height: 16rem;
+  overflow-y: auto;
 }
 
 .upload-task {
   display: grid;
-  gap: 0.55rem;
-  padding: 1rem 1.15rem;
-  border: 1px solid color-mix(in srgb, var(--color-kumo-brand) 22%, transparent);
-  border-radius: 0.85rem;
-  background: color-mix(in srgb, var(--color-kumo-brand) 3%, var(--color-kumo-base));
+  gap: 0.45rem;
+  padding: 0.75rem 0.95rem;
+  border: 1px solid var(--fh-accent-line);
+  border-radius: 0.75rem;
+  background: var(--color-kumo-base);
 }
 
 .upload-task-info {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: 0.5rem;
 }
 
 .upload-task-title {
   font-weight: 600;
-  font-size: 0.9rem;
-  color: var(--color-kumo-contrast);
+  font-size: 0.875rem;
+  color: var(--text-color-kumo-strong);
 }
 
 .upload-task progress {
   width: 100%;
-  height: 6px;
+  height: 5px;
   border-radius: 9999px;
   overflow: hidden;
-  accent-color: var(--color-kumo-brand, #f6821f);
+  appearance: none;
+  border: none;
+  background: var(--color-kumo-fill);
+  accent-color: var(--color-kumo-brand);
+}
+
+.upload-task progress::-webkit-progress-bar {
+  background: var(--color-kumo-fill);
+}
+
+.upload-task progress::-webkit-progress-value {
+  background: var(--color-kumo-brand);
+}
+
+.upload-task progress::-moz-progress-bar {
+  background: var(--color-kumo-brand);
 }
 
 .upload-task-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 0.75rem;
   flex-wrap: wrap;
 }
 
 .upload-task-actions {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.4rem;
 }
+
+.chat-recovery-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.65rem;
+  background: var(--color-kumo-warning-tint);
+  border: 1px solid var(--fh-warning-line);
+}
+
+.file-picker { display: none; }
 
 /* ==========================================================================
-   Composer Section
+   Modern Grand Chat Composer Card
    ========================================================================== */
-.composer { margin-top: 0.25rem; }
-.composer-byte-meter {
-  font-size: 0.825rem;
-  padding: 0.25rem 0.65rem;
-  border-radius: 0.45rem;
-  background: color-mix(in srgb, var(--color-kumo-contrast) 5%, transparent);
-  color: var(--text-color-kumo-subtle);
-}
-
-.composer-input-row {
-  display: grid;
+.chat-composer-box {
+  padding: 0.85rem 1.5rem 1.15rem;
+  background: var(--color-kumo-base);
+  border-top: 1px solid var(--color-kumo-hairline);
+  display: flex;
+  flex-direction: column;
   gap: 0.35rem;
+  flex-shrink: 0;
+  position: relative;
 }
 
-.composer textarea {
-  min-height: 8.5rem;
-  resize: vertical;
-  font-family: inherit;
-  font-size: 0.95rem;
-  line-height: 1.5;
+.composer-card-container {
+  background: var(--color-kumo-recessed);
+  border: 1px solid var(--color-kumo-line);
+  border-radius: 1.15rem;
+  padding: 0.85rem 1.15rem 0.75rem;
+  box-shadow: 0 1px 3px var(--color-kumo-shadow-drop);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.composer-footer-actions {
+.composer-card-container:focus-within {
+  border-color: var(--color-kumo-brand);
+  background: var(--color-kumo-base);
+  box-shadow: 0 0 0 3px var(--fh-focus-ring);
+}
+
+.chat-composer-box.drag-over .composer-card-container {
+  border-color: var(--color-kumo-brand);
+  background: var(--fh-accent-tint);
+  box-shadow: 0 0 0 3px var(--fh-focus-ring);
+}
+
+.composer-main-input-area {
+  width: 100%;
+  display: flex;
+}
+
+.composer-textarea {
+  width: 100% !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+  background: transparent !important;
+  resize: none !important;
+  font-size: 0.95rem !important;
+  line-height: 1.55 !important;
+  color: var(--text-color-kumo-strong) !important;
+  padding: 0.15rem 0 !important;
+  min-height: 3.75rem !important;
+  max-height: 12rem !important;
+  font-family: inherit !important;
+}
+
+.composer-textarea::placeholder {
+  color: var(--text-color-kumo-placeholder) !important;
+}
+
+.composer-bottom-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--color-kumo-hairline);
 }
 
-.composer-key-tip {
+.composer-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.composer-attach-icon-btn {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 32px !important;
+  height: 32px !important;
+  min-width: 32px !important;
+  border-radius: 50% !important;
+  transition: all 0.15s ease !important;
+  padding: 0 !important;
+}
+
+.composer-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.composer-shortcut-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.775rem;
   color: var(--text-color-kumo-subtle);
 }
 
-.recovery { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.composer-shortcut-hint kbd {
+  display: inline-block;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.7rem;
+  font-family: inherit;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--text-color-kumo-subtle);
+  background: var(--color-kumo-tint);
+  border: 1px solid var(--color-kumo-line);
+  border-radius: 4px;
+  box-shadow: 0 1px 1px var(--color-kumo-shadow-drop);
+}
+
+.composer-send-button {
+  font-weight: 600 !important;
+  border-radius: 0.6rem !important;
+  padding: 0.45rem 1.15rem !important;
+  transition: all 0.15s ease !important;
+}
+
+.composer-send-button:not(:disabled):hover {
+  transform: translateY(-1px);
+}
 
 /* ==========================================================================
    Storage Usage Section
    ========================================================================== */
 .storage-usage {
   display: grid;
-  gap: 1rem;
-  padding: 1.25rem;
-  border-radius: 0.95rem;
-  background: color-mix(in srgb, var(--color-kumo-elevated) 45%, var(--color-kumo-base));
-  border: 1px solid color-mix(in srgb, var(--color-kumo-contrast) 6%, transparent);
-  margin: 0.5rem 0 1rem;
+  gap: 0.85rem;
+  padding: 1.15rem 1.35rem;
+  border-radius: 1.15rem;
+  background: var(--color-kumo-recessed);
+  border: 1px solid var(--color-kumo-line);
+  margin: 0.5rem 0;
 }
 
 .storage-heading-row {
@@ -629,9 +1141,9 @@ body {
   font-weight: 600;
   padding: 0.2rem 0.65rem;
   border-radius: 9999px;
-  background: color-mix(in srgb, var(--color-kumo-brand) 12%, transparent);
-  color: var(--color-kumo-brand);
-  border: 1px solid color-mix(in srgb, var(--color-kumo-brand) 25%, transparent);
+  background: var(--fh-accent-tint);
+  color: var(--text-color-kumo-info);
+  border: 1px solid var(--fh-accent-line);
 }
 
 .storage-meter-track {
@@ -640,28 +1152,28 @@ body {
   height: 8px;
   border-radius: 9999px;
   overflow: hidden;
-  background: color-mix(in srgb, var(--color-kumo-contrast) 8%, transparent);
+  background: var(--color-kumo-fill);
   gap: 2px;
 }
 
 .storage-meter-fill.saved {
-  background: var(--color-kumo-brand, #f6821f);
+  background: var(--fh-storage-saved);
   border-radius: 9999px 0 0 9999px;
 }
 
 .storage-meter-fill.reserved {
-  background: #f59e0b;
+  background: var(--fh-storage-reserved);
 }
 
 .storage-meter-fill.cleaning {
-  background: #8b5cf6;
+  background: var(--fh-storage-cleaning);
   border-radius: 0 9999px 9999px 0;
 }
 
 .storage-values {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
-  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
+  gap: 0.65rem;
   margin: 0;
   padding: 0;
 }
@@ -669,94 +1181,296 @@ body {
 .storage-stat-card {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  padding: 0.75rem 0.9rem;
-  border-radius: 0.65rem;
-  background: var(--color-kumo-base, #ffffff);
-  border: 1px solid color-mix(in srgb, var(--color-kumo-contrast) 6%, transparent);
+  gap: 0.2rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 0.75rem;
+  background: var(--color-kumo-base);
+  border: 1px solid var(--color-kumo-line);
 }
 
 .storage-stat-card dt {
-  font-size: 0.775rem;
+  font-size: 0.75rem;
   color: var(--text-color-kumo-subtle);
 }
 
 .storage-stat-card dd {
   margin: 0;
-  font-size: 0.95rem;
+  font-size: 0.925rem;
   font-weight: 600;
-  color: var(--color-kumo-contrast);
+  color: var(--text-color-kumo-strong);
   font-variant-numeric: tabular-nums;
   word-break: break-all;
 }
 
 /* ==========================================================================
-   Server Files Section
+   Server Files Page
    ========================================================================== */
 .server-files-panel {
   display: grid;
   gap: 1.25rem;
+  padding: 1.75rem 2rem;
+  border-radius: 1.5rem;
+}
+
+.server-files-hero-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--color-kumo-hairline);
+  gap: 1rem;
+}
+
+.server-files-hero-left {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.server-files-cloud-emblem {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 1rem;
+  background: var(--fh-accent-tint);
+  color: var(--color-kumo-brand);
+  flex-shrink: 0;
+}
+
+.server-files-hero-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.server-files-main-title {
+  font-size: 1.45rem;
+  font-weight: 700;
+  color: var(--text-color-kumo-strong);
+  margin: 0;
+}
+
+.server-files-main-subtitle {
+  color: var(--text-color-kumo-subtle);
+  font-size: 0.825rem;
+  margin: 0;
+}
+
+.server-files-hero-tools {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.server-tool-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--color-kumo-base);
+  border: 1px solid var(--color-kumo-line);
+  color: var(--text-color-kumo-subtle);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.server-tool-btn:hover {
+  color: var(--text-color-kumo-strong);
+  border-color: var(--color-kumo-interact);
+  background: var(--color-kumo-recessed);
+}
+
+.server-plus-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--color-kumo-brand);
+  color: var(--color-white);
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 2px 6px var(--color-kumo-shadow-drop);
+  transition: all 0.15s ease;
+}
+
+.server-plus-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.server-plus-btn:not(:disabled):hover {
+  background: var(--color-kumo-brand-hover);
+  transform: scale(1.05);
+}
+
+.server-files-search-row {
+  display: flex;
+  width: 100%;
+}
+
+.server-files-search-input {
+  width: 100%;
+  padding: 0.65rem 1rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-kumo-interact);
+  background: var(--color-kumo-recessed);
+  font-size: 0.9rem;
+  outline: none;
+}
+
+.server-files-search-input:focus {
+  border-color: var(--color-kumo-brand);
+  background: var(--color-kumo-base);
+  box-shadow: 0 0 0 3px var(--fh-focus-ring);
+}
+
+/* 4 Category Cards Grid */
+.server-category-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+  margin: 0.5rem 0;
+}
+
+.server-category-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 1.25rem 1rem;
+  border-radius: 1.25rem;
+  background: var(--color-kumo-base);
+  border: 1px solid var(--color-kumo-line);
+  box-shadow: 0 1px 3px var(--color-kumo-shadow-drop);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.server-category-card:hover {
+  border-color: var(--fh-accent-line);
+  box-shadow: 0 4px 12px var(--color-kumo-shadow-drop);
+  transform: translateY(-2px);
+}
+
+.server-category-card.selected {
+  border-color: var(--color-kumo-brand);
+  background: var(--fh-accent-tint);
+}
+
+.text-folder-blue {
+  color: var(--color-kumo-brand);
+}
+
+.category-card-label {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--text-color-kumo-default);
+  margin-top: 0.5rem;
+}
+
+.category-card-count {
+  font-size: 0.775rem;
+  color: var(--text-color-kumo-subtle);
+  margin-top: 0.2rem;
+}
+
+/* Recent Files Section */
+.server-recent-section {
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 0.75rem;
+}
+
+.server-recent-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.25rem 0;
+}
+
+.server-recent-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-color-kumo-strong);
+  margin: 0;
+}
+
+.server-recent-sort {
+  font-size: 0.8rem;
+  color: var(--text-color-kumo-subtle);
+}
+
+.server-empty-state {
+  padding: 2rem 1rem;
+  text-align: center;
+  color: var(--text-color-kumo-subtle);
+}
+
+.server-file-list {
+  display: grid;
+  gap: 0.65rem;
 }
 
 .server-file-item {
-  padding: 1.15rem 1.25rem;
-  border-radius: 0.95rem;
-  border: 1px solid color-mix(in srgb, var(--color-kumo-contrast) 6%, transparent);
-  background: color-mix(in srgb, var(--color-kumo-elevated) 45%, var(--color-kumo-base));
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  padding: 0.85rem 1.15rem;
+  border-radius: 1rem;
+  border: 1px solid var(--color-kumo-hairline);
+  background: var(--color-kumo-base);
+  box-shadow: 0 1px 2px var(--color-kumo-shadow-drop);
+  transition: all 0.15s ease;
 }
 
 .server-file-item:hover {
-  border-color: color-mix(in srgb, var(--color-kumo-brand) 25%, transparent);
-  box-shadow: 0 2px 8px -2px rgba(0, 0, 0, 0.04);
+  border-color: var(--color-kumo-interact);
+  background: var(--color-kumo-recessed);
+  box-shadow: 0 2px 8px var(--color-kumo-shadow-drop);
 }
 
 .server-file-card-content {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 1rem;
   width: 100%;
 }
 
-.server-file-icon-box {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--color-kumo-brand) 10%, transparent);
+.server-file-badge-wrapper {
   flex-shrink: 0;
 }
 
 .server-file-info {
-  display: grid;
-  gap: 0.35rem;
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
 }
 
-.server-file-info h3 {
+.server-file-name {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 600;
-  color: var(--color-kumo-contrast);
-  word-break: break-all;
+  color: var(--text-color-kumo-default);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .server-file-meta-row {
   display: flex;
   align-items: center;
-  gap: 0.85rem;
-  flex-wrap: wrap;
-  font-size: 0.825rem;
+  gap: 0.4rem;
+  font-size: 0.775rem;
   color: var(--text-color-kumo-subtle);
 }
 
-.server-file-state-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
+.server-file-meta-dot {
+  color: var(--text-color-kumo-subtle);
 }
 
 .server-file-actions-row {
@@ -764,7 +1478,6 @@ body {
   align-items: center;
   gap: 0.75rem;
   flex-shrink: 0;
-  align-self: center;
 }
 
 .server-file-download-btn {
@@ -773,16 +1486,16 @@ body {
   gap: 0.35rem;
   font-size: 0.85rem;
   font-weight: 500;
-  color: var(--color-kumo-brand, #f6821f);
+  color: var(--text-color-kumo-link);
   text-decoration: none;
   padding: 0.4rem 0.8rem;
   border-radius: 0.6rem;
-  background: color-mix(in srgb, var(--color-kumo-brand) 10%, transparent);
+  background: var(--fh-accent-tint);
   transition: background 0.15s ease;
 }
 
 .server-file-download-btn:hover {
-  background: color-mix(in srgb, var(--color-kumo-brand) 18%, transparent);
+  background: var(--fh-accent-hover);
 }
 
 .load-more-row {
@@ -802,11 +1515,120 @@ body {
   color: var(--text-color-kumo-danger);
 }
 
+/* Bottom Upload Dropzone Card */
+.server-dropzone-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.25rem;
+  padding: 1.75rem 2rem;
+  border-radius: 1.25rem;
+  background: var(--fh-accent-tint);
+  border: 2px dashed var(--fh-accent-line);
+  cursor: pointer;
+  margin-top: 0.75rem;
+  transition: all 0.15s ease;
+}
+
+.server-dropzone-box[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.server-dropzone-box:not([aria-disabled="true"]):hover, .server-dropzone-box.dragging {
+  background: var(--fh-accent-hover);
+  border-color: var(--color-kumo-brand);
+}
+
+.dropzone-icon-circle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  border-radius: 50%;
+  background: var(--color-kumo-base);
+  color: var(--color-kumo-brand);
+  box-shadow: 0 2px 6px var(--color-kumo-shadow-drop);
+}
+
+.dropzone-text-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  text-align: left;
+}
+
+.dropzone-prompt-text {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-color-kumo-default);
+}
+
+.dropzone-sub-text {
+  font-size: 0.775rem;
+  color: var(--text-color-kumo-subtle);
+}
+
+/* ==========================================================================
+   File Type Badges
+   ========================================================================== */
+.file-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  border-radius: 8px;
+  font-weight: 700;
+  background: var(--fh-file-tint);
+  color: var(--fh-file-ink);
+}
+
+.file-badge.sm {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  border-radius: 6px;
+  font-size: 0.7rem;
+}
+
+.file-badge-pdf {
+  font-size: 0.75rem;
+}
+
+.file-badge-word {
+  font-size: 0.85rem;
+}
+
+.file-badge-excel {
+  font-size: 0.85rem;
+}
+
+.file-badge-text {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  letter-spacing: -0.02em;
+}
+
 /* ==========================================================================
    Responsive Adaptations
    ========================================================================== */
 @media (max-width: 980px) {
   .app-shell.workspace-mode { width: min(760px, calc(100% - 2rem)); }
-  .masthead, .panel-heading, .message header, .server-file-card-content { display: grid; }
+  .server-category-grid { grid-template-columns: repeat(2, 1fr); }
+  .server-file-card-content { flex-direction: column; align-items: flex-start; }
   .server-file-actions-row { align-self: flex-start; }
+}
+
+@media (max-width: 640px) {
+  .server-category-grid { grid-template-columns: repeat(2, 1fr); }
+  .server-files-hero-header { flex-direction: column; align-items: flex-start; gap: 0.85rem; }
+  .server-files-hero-tools { width: 100%; justify-content: flex-start; }
+  .server-dropzone-box { flex-direction: column; text-align: center; }
+  .dropzone-text-group { text-align: center; }
+  .chat-composer-box { padding: 0.65rem 0.85rem 0.85rem; }
+  .composer-card-container { padding: 0.65rem 0.85rem 0.55rem; border-radius: 0.85rem; }
+  .composer-shortcut-hint { display: none; }
 }

@@ -1,12 +1,12 @@
 # Spec 002：桌面文件传输与容量控制
 
-状态：原桌面版本已验收；单轮发送与串行交互及登录失效后清空等待项/File 引用已随 [Spec 007](007-implemented-flow-simplification.md) B/C 实现，稳定版桌面 Chrome 人工确认待完成。旧版证据见 [#33](https://github.com/nt1r/FileHop/issues/33)，不代表新行为的验收证据。
+状态：已确认。实施及验证状态见[路线图](../roadmap.md#已有能力)，后续交互精简见[流程精简](../roadmap.md#流程精简)。
 
 本文是文件传输的唯一行为契约；Spec 007 只组织改造。关联：[产品基线](../product.md) · [Spec 001](001-desktop-text-loop.md) · [Spec 003](003-server-file-management.md) · [路线图](../roadmap.md)。
 
 ## 1. 范围
 
-消息工作区内多选、追加、串行流式上传及认证附件下载。文本发送独立。Android 复用同一文件发送语义，平台选择/保存见 [Spec 006](006-android-files.md)。
+消息工作区及服务器文件页内多选、追加、串行流式上传及认证附件下载，两个页面共用同一队列并展示上传任务及必要操作；文件页入口见 Spec 003。文本发送独立。Android 复用同一文件发送语义，平台选择/保存见 [Spec 006](006-android-files.md)。
 
 不做目录、分片、续传、内容去重、病毒扫描、跨刷新队列恢复、可靠后台传输、同一文件发送的后继重传或服务端强保证停止。
 
