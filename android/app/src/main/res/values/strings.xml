@@ -15,6 +15,7 @@
     <string name="action_save">保存</string>
     <string name="configure_title">连接你的服务器</string>
     <string name="server_address_label">HTTPS 服务器地址</string>
+    <string name="server_address_example" translatable="false">https://filehop.example.invalid</string>
     <string name="server_address_hint">确认后固定使用此地址。更换服务器需清除应用数据。</string>
     <string name="action_continue">继续</string>
     <string name="server_confirm_title">确认服务器</string>
