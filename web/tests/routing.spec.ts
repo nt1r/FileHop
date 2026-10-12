@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { resolve } from 'node:path'
 
-test('deep links, authentication redirects and history preserve the workspace', async ({ page }) => {
+test('deep links, authentication redirects and history preserve the workspace', async ({ page }, testInfo) => {
   test.setTimeout(120_000)
   execFileSync('cargo', ['test', '--manifest-path', resolve('../backend/Cargo.toml'), '--locked', '--test', 'initialization', 'initialize_external_fixture', '--', '--ignored', '--exact'], {
     timeout: 120_000,
@@ -12,6 +12,11 @@ test('deep links, authentication redirects and history preserve the workspace', 
   await page.goto('/files')
   await expect(page).toHaveURL(/\/login\?next=%2Ffiles$/)
   await expect(page.getByRole('region', { name: '服务器文件' })).toHaveCount(0)
+  await expect(page.locator('.brand-logo-emblem img')).toHaveJSProperty('naturalWidth', 256)
+  const favicon = await page.request.get((await page.locator('link[rel="icon"]').getAttribute('href'))!)
+  expect(favicon.ok()).toBeTruthy()
+  expect((await favicon.body()).subarray(0, 6)).toEqual(Buffer.from([0, 0, 1, 0, 3, 0]))
+  await page.screenshot({ path: testInfo.outputPath('brand-login.png') })
   await page.reload()
   await page.getByLabel('用户名').fill('Admin')
   await page.getByLabel('密码', { exact: true }).fill(' synthetic password ')
@@ -21,6 +26,8 @@ test('deep links, authentication redirects and history preserve the workspace', 
   await page.reload()
   await expect(page.getByRole('region', { name: '服务器文件' })).toBeVisible()
   await page.getByRole('link', { name: '消息工作区', exact: true }).click()
+  await expect(page.locator('.brand-icon-mini img')).toHaveJSProperty('naturalWidth', 256)
+  await page.screenshot({ path: testInfo.outputPath('brand-workspace.png') })
   await page.getByLabel('正文', { exact: true }).fill('routing draft')
   await page.getByRole('link', { name: '服务器文件', exact: true }).click()
   await page.goBack()
