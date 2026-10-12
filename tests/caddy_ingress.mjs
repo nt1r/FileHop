@@ -97,7 +97,7 @@ https://localhost:${port} {
     assert.equal(JSON.parse(res.body).authorization, null)
   }
   // API authentication belongs to the real backend; this probe checks transport only.
-  for (const authorization of [undefined, auth, 'bAsIc d3Jvbmc6d3Jvbmc=', 'Bearer synthetic-token', 'Unknown synthetic']) {
+  for (const authorization of [undefined, auth, 'bAsIc d3Jvbmc6d3Jvbmc=', 'Basictsynthetic', 'Bearer synthetic-token', 'Unknown synthetic']) {
     const res = await request('/api/native/session', {
       ...(authorization ? { authorization } : {}),
       Cookie: '__Host-filehop=synthetic-cookie', Origin: `https://localhost:${port}`,

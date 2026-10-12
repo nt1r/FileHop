@@ -2,7 +2,7 @@
 route {
 	handle /api/* {
 		# API 由 FileHop 鉴权；移除浏览器缓存的外层 Basic，保留原生 Bearer。
-		@basic header_regexp Authorization "(?i)^Basic[ \\t]+"
+		@basic header_regexp Authorization "(?i)^Basic +"
 		request_header @basic -Authorization
 		reverse_proxy {$FILEHOP_BACKEND_UPSTREAM} {
 			# 覆盖伪造来源；后端还须核对 TCP 对端是配置的精确代理地址。
