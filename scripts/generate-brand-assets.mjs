@@ -34,13 +34,13 @@ try {
       if (pixels[(y * image.width + x) * 4 + 3] <= 16) continue
       radius = Math.max(radius, Math.hypot(x + 0.5 - (left + right) / 2, y + 0.5 - (top + bottom) / 2))
     }
-    const render = (size, adaptive = false, monochrome = false, background = false) => {
+    const render = (size, safeRadiusFraction = null, monochrome = false, background = false) => {
       const canvas = document.createElement('canvas')
       canvas.width = size; canvas.height = size
       const context = canvas.getContext('2d')
       if (background) { context.fillStyle = '#F4F9F8'; context.fillRect(0, 0, size, size) }
-      // Adaptive artwork fits inside radius 31.32/108, within the 66dp safe circle.
-      const scale = adaptive ? size * 0.29 / radius : size * 0.90 / Math.max(width, height)
+      const scale = safeRadiusFraction === null
+        ? size * 0.90 / Math.max(width, height) : size * safeRadiusFraction / radius
       context.drawImage(image, left, top, width, height,
         (size - width * scale) / 2, (size - height * scale) / 2, width * scale, height * scale)
       if (monochrome) {
@@ -50,8 +50,12 @@ try {
       return canvas.toDataURL('image/png').split(',')[1]
     }
     return {
-      logo: render(256), foreground: render(432, true), monochrome: render(432, true, true),
-      favicons: [16, 32, 48].map(size => ({ size, data: render(size, false, false, true) })),
+      // Launcher: radius 31.32/108, inside the 66dp safe circle.
+      logo: render(256), foreground: render(432, 0.29), monochrome: render(432, 0.29, true),
+      // Splash without icon background: 288dp at xxxhdpi; radius < 96dp.
+      // Render directly from the master, never from the 432px launcher foreground.
+      splash: render(1152, 0.32),
+      favicons: [16, 32, 48].map(size => ({ size, data: render(size, null, false, true) })),
     }
   }, source.toString('base64'))
   const save = async (path, bytes) => {
@@ -64,6 +68,7 @@ try {
   await save('android/app/src/main/res/drawable-nodpi/filehop_logo.png', logo)
   await save('android/app/src/main/res/drawable-nodpi/ic_launcher_foreground.png', Buffer.from(images.foreground, 'base64'))
   await save('android/app/src/main/res/drawable-nodpi/ic_launcher_monochrome.png', Buffer.from(images.monochrome, 'base64'))
+  await save('android/app/src/main/res/drawable-xxxhdpi/splash_logo.png', Buffer.from(images.splash, 'base64'))
   // ICO with PNG frames; browsers choose the closest size without loading the master.
   const frames = images.favicons.map(({ data }) => Buffer.from(data, 'base64'))
   const header = Buffer.alloc(6 + 16 * frames.length)
