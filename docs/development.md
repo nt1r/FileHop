@@ -52,8 +52,8 @@ bash tests/browser.sh web/tests/server-files.spec.ts
 首次接入按以下顺序进行；已有需保留的实例走迁移，不重新初始化：
 
 1. **准备配置和目录**：参考 [`.env.example`](../.env.example) 创建仓库外或已忽略的实际配置。填写开发域名、专用网络和精确的可信代理 IP；示例 `.invalid` 域名及文档 IP 不能用于真实接入。确认 `data-dev/database`、`data-dev/files` 彼此独立、已存在且可由容器 UID/GID 10001 写入，不使用 `chmod 777`。
-2. **配置入口**：经授权建立专用应用网络；容器 Caddy 加入该网络，宿主 Caddy 使用该网络的固定内部地址。容器入口参考 [`deploy/Caddyfile.dev.example`](../deploy/Caddyfile.dev.example)；宿主入口按[独立宿主开发入口](host-ingress.md)配置服务和 Compose overlay。落实开发 Basic Auth、同域 WSS、仅 TCP 443 及证书持久化。全局关闭 HTTP 跳转并使用 TLS-ALPN-01 而非 HTTP-01，核实 DNS／CAA 和云入站规则。共享全局 Caddy 配置变更需单独审阅授权。
-3. **核对代理信任**：可信代理必须是实际受控 Caddy 的精确、稳定地址，不是整个网段。Caddy 覆盖客户端来源头并移除外层 Authorization；额外 CDN 或上游代理需另行核实。Caddy 地址变化时同步后端配置。
+2. **配置入口**：经授权建立专用应用网络；容器 Caddy 加入该网络，宿主 Caddy 使用该网络的固定内部地址。容器入口参考 [`deploy/Caddyfile.dev.example`](../deploy/Caddyfile.dev.example)；宿主入口按[独立宿主开发入口](host-ingress.md)配置服务和 Compose overlay。落实开发页面/源码/HMR 的 Basic Auth、同域 WSS、仅 TCP 443 及证书持久化；API 交给 FileHop 自身鉴权。全局关闭 HTTP 跳转并使用 TLS-ALPN-01 而非 HTTP-01，核实 DNS／CAA 和云入站规则。共享全局 Caddy 配置变更需单独审阅授权。
+3. **核对代理信任**：可信代理必须是实际受控 Caddy 的精确、稳定地址，不是整个网段。Caddy 覆盖客户端来源头；API 请求仅移除外层 Basic 凭证，保留 Bearer、Cookie 和 Origin，开发 Web 转发则移除 Authorization；额外 CDN 或上游代理需另行核实。Caddy 地址变化时同步后端配置。
 4. **校验并启动**：确认配置、路径和网络后，使用与入口相符的一组 Compose 文件启动。以下为容器入口示例；`.env` 替换为实际配置文件，宿主方案需同时传入 `deploy/compose.host.yml`。
 
    ```bash
