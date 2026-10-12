@@ -19,15 +19,17 @@ class SessionStore(context: Context) {
     private val alias = "filehop.session"
     private val defaultLabel = context.getString(R.string.default_source_label)
     private fun keys() = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-    var origin: String?
+    val origin: String?
         get() = prefs.getString("origin", null)
-        private set(value) { check(prefs.edit().putString("origin", value).commit()) }
     var label: String
         get() = prefs.getString("label", defaultLabel) ?: defaultLabel
         set(value) { check(prefs.edit().putString("label", value).commit()) }
     fun configure(value: String) {
-        check(origin == null)
-        origin = requireNotNull(TextRules.origin(value))
+        val valid = requireNotNull(TextRules.origin(value))
+        // Destroy the old key before changing origin: even a failed disk write must not
+        // make an old token usable with a new server after restart.
+        keys().deleteEntry(alias)
+        check(prefs.edit().remove("session").putString("origin", valid).commit())
     }
     fun save(session: Session) {
         val key = (keys().getKey(alias, null) as? SecretKey) ?: KeyGenerator.getInstance(

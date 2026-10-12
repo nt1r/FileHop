@@ -7,6 +7,8 @@ class TextRulesTest {
     @Test fun onlyAnHttpsDomainRootCanBeConfirmed() {
         assertEquals("https://example.invalid", TextRules.origin("https://example.invalid/"))
         assertEquals("https://example.invalid:8443", TextRules.origin("https://example.invalid:8443"))
+        assertEquals("https://example.invalid", TextRules.origin(" HTTPS://EXAMPLE.invalid:443/ "))
+        assertNotEquals(TextRules.origin("https://example.invalid"), TextRules.origin("https://example.invalid:8443"))
         listOf("", "   ", "http://example.invalid", "https://user:pass@example.invalid", "https://example.invalid/path",
             "https://example.invalid/../", "https://example.invalid/?q=x", "https://example.invalid/#x",
             "https://example.invalid/?", "https://127.0.0.1", "https://[::1]").forEach { assertNull(it, TextRules.origin(it)) }

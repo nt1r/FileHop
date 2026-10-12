@@ -61,9 +61,15 @@ private fun FileHop(vm: HopViewModel = viewModel()) {
     }
     var logout by remember { mutableStateOf(false) }
     var editLabel by remember { mutableStateOf(false) }
+    var changeServer by remember { mutableStateOf(false) }
     Scaffold(
         topBar = {
             TopAppBar(title = { Text(stringResource(R.string.app_name), fontWeight = FontWeight.Bold) }, actions = {
+                if (screen.origin.isNotEmpty()) {
+                    TextButton(onClick = { changeServer = true }, enabled = !screen.sending) {
+                        Text(stringResource(R.string.action_change_server))
+                    }
+                }
                 if (screen.phase == Phase.Ready) {
                     TextButton(onClick = { editLabel = true }) { Text(stringResource(R.string.action_source_label)) }
                     TextButton(onClick = { logout = true }) { Text(stringResource(R.string.action_logout)) }
@@ -78,19 +84,22 @@ private fun FileHop(vm: HopViewModel = viewModel()) {
                     Text(stringResource(notice), Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium)
                 }
             }
-            when (screen.phase) {
-                Phase.Configure -> Configure(vm)
-                Phase.Login -> Login(screen, vm)
-                Phase.Checking -> Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    if (screen.loggingIn) LinearProgressIndicator(Modifier.fillMaxWidth())
-                    Text(stringResource(R.string.session_checking))
-                    Button(onClick = vm::restore, enabled = !screen.loggingIn) { Text(stringResource(R.string.action_retry)) }
-                    TextButton(onClick = vm::logout) { Text(stringResource(R.string.action_logout_local)) }
+            key(screen.origin) {
+                when (screen.phase) {
+                    Phase.Configure -> Configure(vm)
+                    Phase.Login -> Login(screen, vm)
+                    Phase.Checking -> Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        if (screen.loggingIn) LinearProgressIndicator(Modifier.fillMaxWidth())
+                        Text(stringResource(R.string.session_checking))
+                        Button(onClick = vm::restore, enabled = !screen.loggingIn) { Text(stringResource(R.string.action_retry)) }
+                        TextButton(onClick = vm::logout) { Text(stringResource(R.string.action_logout_local)) }
+                    }
+                    Phase.Ready -> Messages(screen, vm)
                 }
-                Phase.Ready -> Messages(screen, vm)
             }
         }
     }
+    if (changeServer) ChangeServer(screen, vm) { changeServer = false }
     if (logout) AlertDialog(onDismissRequest = { logout = false }, title = { Text(stringResource(R.string.logout_title)) },
         text = { Text(stringResource(R.string.logout_message)) },
         confirmButton = { TextButton(onClick = { logout = false; vm.logout() }) { Text(stringResource(R.string.action_logout)) } },
@@ -121,6 +130,36 @@ private fun Configure(vm: HopViewModel) {
         text = { Text(TextRules.origin(origin).orEmpty()) },
         confirmButton = { TextButton(onClick = { confirm = false; vm.configure(origin) }) { Text(stringResource(R.string.action_confirm)) } },
         dismissButton = { TextButton(onClick = { confirm = false }) { Text(stringResource(R.string.action_back)) } })
+}
+
+@Composable
+private fun ChangeServer(screen: Screen, vm: HopViewModel, onDismiss: () -> Unit) {
+    var origin by remember { mutableStateOf(screen.origin) }
+    var confirm by remember { mutableStateOf(false) }
+    if (confirm) {
+        AlertDialog(onDismissRequest = onDismiss,
+            title = { Text(stringResource(R.string.server_change_confirm_title)) },
+            text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(TextRules.origin(origin).orEmpty())
+                Text(stringResource(R.string.server_change_warning))
+            } },
+            confirmButton = { TextButton(onClick = { vm.changeServer(origin); onDismiss() }, enabled = !screen.sending) {
+                Text(stringResource(R.string.action_confirm))
+            } },
+            dismissButton = { TextButton(onClick = { confirm = false }) { Text(stringResource(R.string.action_back)) } })
+    } else {
+        AlertDialog(onDismissRequest = onDismiss,
+            title = { Text(stringResource(R.string.action_change_server)) },
+            text = { OutlinedTextField(origin, { origin = it }, modifier = Modifier.fillMaxWidth(),
+                label = { Text(stringResource(R.string.server_address_label)) },
+                placeholder = { Text(stringResource(R.string.server_address_example)) }, singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri)) },
+            confirmButton = { TextButton(onClick = {
+                if (TextRules.origin(origin) == screen.origin) { vm.changeServer(origin); onDismiss() }
+                else confirm = true
+            }, enabled = TextRules.origin(origin) != null) { Text(stringResource(R.string.action_continue)) } },
+            dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } })
+    }
 }
 
 @Composable
