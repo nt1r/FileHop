@@ -19,7 +19,9 @@ apk="$root/android/app/build/outputs/apk/release/app-release.apk"
 "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --verbose --print-certs "$apk" > "$temp/signature.txt"
 expected=$(keytool -exportcert -keystore "$FILEHOP_KEYSTORE" -alias "$FILEHOP_KEY_ALIAS" \
   -storepass:env FILEHOP_STORE_PASSWORD | sha256sum | awk '{print $1}')
-actual=$(awk -F': ' '/^Signer #1 certificate SHA-256 digest:/ {print $2}' "$temp/signature.txt")
+# Keep the release workflow's certificate check exercised with a real synthetic APK.
+actual=$(awk '/^(V[0-9.]+ Signer:|Signer #[0-9]+|Signer \(.*\)) certificate SHA-256 digest: / {print $NF}' \
+  "$temp/signature.txt" | sort -u)
 if [[ "$actual" != "$expected" ]]; then
   echo 'Synthetic APK certificate identity check failed.' >&2
   grep 'certificate SHA-256 digest:' "$temp/signature.txt" >&2 || true
@@ -33,4 +35,4 @@ grep -E "^application: .*icon='[^']+'" "$temp/badging.txt" >/dev/null
 # Keystores are build inputs only, never APK assets.
 unzip -Z1 "$apk" > "$temp/apk-files.txt"
 ! grep -E '\.(jks|keystore)$' "$temp/apk-files.txt"
-echo 'Synthetic release signing and package identity passed; not a device update test.'
+echo 'Synthetic release signing, certificate fingerprint and package identity passed; not a device update test.'
