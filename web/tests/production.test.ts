@@ -53,16 +53,27 @@ test('extracted production page exchanges text and files over isolated HTTPS', a
   const cookies = await context.cookies(origin)
   const cookie = cookies.find(c => c.name === '__Host-filehop')!
   expect(cookie.secure && cookie.httpOnly).toBe(true)
-  // 独立开发入口仍需外层认证；即使手动转送生产 Cookie，也不能读取另一实例。
-  const dev = await browser.newContext({ httpCredentials: { username: 'test', password: 'synthetic-ingress-password' } })
+  // 开发页面仍受 Basic 保护；API 交给后端鉴权，公开状态不代表可匿名读取消息。
+  const devGate = await page.request.get(devOrigin)
+  expect(devGate.status()).toBe(401)
+  expect(devGate.headers()['www-authenticate']).toMatch(/^Basic /)
+  expect(devGate.headers()['x-filehop-access-layer']).toBe('development')
+  const devStatus = await page.request.get(`${devOrigin}/api/status`)
+  expect(devStatus.status()).toBe(200)
+  expect(devStatus.headers()['www-authenticate']).toBeUndefined()
+  expect(await devStatus.json()).toEqual({ state: 'initialized' })
+  const dev = await browser.newContext()
   const devPage = await dev.newPage()
-  expect((await page.request.get(`${devOrigin}/api/status`)).status()).toBe(401)
   await devPage.goto(`${devOrigin}/api/status`)
+  const devMessages = await dev.request.get(`${devOrigin}/api/messages`)
+  expect(devMessages.status()).toBe(401)
+  expect(devMessages.headers()['www-authenticate']).toBeUndefined()
   const result = await devPage.evaluate(async () => {
     const r = await fetch('/api/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'admin', password: ' synthetic password ' }) })
     return r.status
   })
   expect(result).toBe(401)
+  // 即使手动转送生产 Cookie，也不能读取另一实例。
   await dev.addCookies([{ name: cookie.name, value: cookie.value, url: devOrigin, secure: true, httpOnly: true, sameSite: 'Lax' }])
   expect(await devPage.evaluate(async () => (await fetch('/api/messages')).status)).toBe(401)
   expect(await devPage.evaluate(async () => (await fetch('/api/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'developer', password: ' synthetic password ' }) })).status)).toBe(200)
