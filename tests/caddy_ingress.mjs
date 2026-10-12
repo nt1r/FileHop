@@ -9,7 +9,7 @@ import { once } from 'node:events'
 const root = process.argv[2]
 const ca = readFileSync(`${root}/cert.pem`)
 const listen = async server => { server.listen(0, '127.0.0.1'); await once(server, 'listening'); return server.address().port }
-const observed = req => ({ authorization: req.headers.authorization ?? null, clientIp: req.headers['x-filehop-client-ip'] ?? null })
+const observed = req => ({ authorization: req.headers.authorization ?? null, cookie: req.headers.cookie ?? null, origin: req.headers.origin ?? null, clientIp: req.headers['x-filehop-client-ip'] ?? null })
 // 上游探针只验证反向代理的公开 HTTP 边界，不模拟应用认证或存储规则。
 const upstream = http.createServer((req, res) => {
   if (req.url === '/api/file-sends/probe/attempts/probe/content') {
@@ -85,7 +85,7 @@ https://localhost:${port} {
       await new Promise(resolve => setTimeout(resolve, 100))
     }
   }
-  for (const path of ['/', '/api/status', '/@vite/client', '/src/main.tsx']) {
+  for (const path of ['/', '/@vite/client', '/src/main.tsx']) {
     for (const authorization of [undefined, 'Basic d3Jvbmc6d3Jvbmc=']) {
       const res = await request(path, authorization ? { authorization } : {})
       assert.equal(res.status, 401, `${path}: ${JSON.stringify(res)}`)
@@ -95,9 +95,24 @@ https://localhost:${port} {
     const res = await request(path, { authorization: auth, 'X-FileHop-Client-IP': '203.0.113.9' })
     assert.equal(res.status, 200)
     assert.equal(JSON.parse(res.body).authorization, null)
-    if (path.startsWith('/api/')) assert.equal(JSON.parse(res.body).clientIp, '127.0.0.1')
+  }
+  // API authentication belongs to the real backend; this probe checks transport only.
+  for (const authorization of [undefined, auth, 'bAsIc d3Jvbmc6d3Jvbmc=', 'Bearer synthetic-token', 'Unknown synthetic']) {
+    const res = await request('/api/native/session', {
+      ...(authorization ? { authorization } : {}),
+      Cookie: '__Host-filehop=synthetic-cookie', Origin: `https://localhost:${port}`,
+      'X-FileHop-Client-IP': '203.0.113.9',
+    })
+    assert.equal(res.status, 200)
+    assert.equal(res.headers['www-authenticate'], undefined)
+    const forwarded = JSON.parse(res.body)
+    assert.equal(forwarded.authorization, authorization && !/^basic /i.test(authorization) ? authorization : null)
+    assert.equal(forwarded.cookie, '__Host-filehop=synthetic-cookie')
+    assert.equal(forwarded.origin, `https://localhost:${port}`)
+    assert.equal(forwarded.clientIp, '127.0.0.1')
   }
   for (const path of ['/internal/live', '/internal/ready']) {
+    assert.equal((await request(path)).status, 404)
     assert.equal((await request(path, { authorization: auth })).status, 404)
   }
   assert.equal((await request('/api/files/no-headers', { authorization: auth })).status, 504)
@@ -126,16 +141,11 @@ https://localhost:${port} {
   assert.match(attachment.headers['content-disposition'], /^attachment/)
   assert.ok(attachment.body.length >= 2 * 65536)
   assert.ok([...attachment.body].every(byte => byte === 'Z'))
-  for (const path of ['/api/file-sends/probe/attempts/probe/content', '/api/files/probe']) {
-    const res = await request(path)
-    assert.equal(res.status, 401)
-    assert.equal(res.headers['x-filehop-access-layer'], 'development')
-  }
   const upgrade = { Connection: 'Upgrade', Upgrade: 'websocket', 'Sec-WebSocket-Version': '13', 'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==' }
   assert.equal((await request('/', upgrade)).status, 401)
   assert.equal((await request('/', { ...upgrade, authorization: 'Basic d3Jvbmc6d3Jvbmc=' })).status, 401)
   assert.equal((await request('/', { ...upgrade, authorization: auth })).status, 101)
-  console.log('HTTPS page/API/HMR/upgrade gate, credential removal, source override, internal route protection and progressing transfers over 15 seconds passed.')
+  console.log('HTTPS page/HMR gate, API Bearer/Cookie/Origin forwarding, Basic removal, source override, internal route protection and progressing transfers over 15 seconds passed.')
 } finally {
   if (child && child.exitCode === null) {
     child.kill('SIGTERM')
