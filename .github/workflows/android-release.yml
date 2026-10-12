@@ -77,7 +77,6 @@ jobs:
           FILEHOP_KEY_ALIAS: ${{ secrets.FILEHOP_ANDROID_KEY_ALIAS }}
           FILEHOP_KEY_PASSWORD: ${{ secrets.FILEHOP_ANDROID_KEY_PASSWORD }}
           EXPECTED_CERT: ${{ vars.FILEHOP_ANDROID_CERT_SHA256 }}
-          DEFAULT_ORIGIN: ${{ vars.FILEHOP_ANDROID_DEFAULT_ORIGIN }}
         run: |
           set -euo pipefail
           : "${KEYSTORE_BASE64:?Missing signing key}"
@@ -85,16 +84,13 @@ jobs:
           : "${FILEHOP_KEY_ALIAS:?Missing key alias}"
           : "${FILEHOP_KEY_PASSWORD:?Missing key password}"
           [[ "$EXPECTED_CERT" =~ ^[0-9a-f]{64}$ ]]
-          [[ "$DEFAULT_ORIGIN" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?/?$ ]]
-          [[ "$DEFAULT_ORIGIN" != *'.invalid'* ]]
           umask 077
           export FILEHOP_KEYSTORE=$(mktemp "$RUNNER_TEMP/filehop-signing.XXXXXX")
           trap 'rm -f -- "$FILEHOP_KEYSTORE"' EXIT
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$FILEHOP_KEYSTORE"
           unset KEYSTORE_BASE64
           (cd android && ./gradlew --no-daemon :app:assembleRelease \
-            "-PfilehopVersionCode=$VERSION_CODE" "-PfilehopVersionName=${VERSION#v}" \
-            "-PfilehopDefaultOrigin=$DEFAULT_ORIGIN")
+            "-PfilehopVersionCode=$VERSION_CODE" "-PfilehopVersionName=${VERSION#v}")
           mkdir -p android-release-assets
           cp android/app/build/outputs/apk/release/app-release.apk android-release-assets/filehop.apk
           "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --verbose --print-certs android-release-assets/filehop.apk > "$RUNNER_TEMP/android-signature.txt"

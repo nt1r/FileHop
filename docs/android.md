@@ -30,7 +30,7 @@ application ID 不同即为另一款应用，不能覆盖安装或继承其设�
 ## 首次配置与使用
 
 - 首次填写并确认 HTTPS 域名根地址，不允许账户信息、路径、查询或片段；确认后固定，更换需清除应用数据。
-- 源码构建的默认地址为保留示例地址 `https://filehop.example.invalid`，不是可连接的服务。正式构建通过 `-PfilehopDefaultOrigin=https://<正式域名>` 设置默认地址；用户仍须首次确认。真实部署地址不写入源码。
+- 公开 APK 与开发 APK 均不预置服务器地址；首次输入框留空，`https://filehop.example.invalid` 仅为占位提示，不是可连接的服务。每位用户填写自己部署的 HTTPS 根地址，并使用该实例的账户登录；无需按服务器分别构建 APK。升级保留已经确认的地址和设置。
 - 服务器须先具备 Spec 005 原生会话接口。已有实例通过受授权的正常发布/迁移流程应用 `0002_next_release.sql`，不重写 `0001`，不清库。合并客户端代码不会自动更新服务器。
 - 使用现有账户登录，查看、发送及主动复制纯文本。文件消息仅展示文件名及暂不支持提示。
 - 前台刷新与历史读取使用既有游标协议；结果未确认时手动查询、同次重试或放弃确认，不能把再次发送当作撤回。
@@ -51,7 +51,6 @@ application ID 不同即为另一款应用，不能覆盖安装或继承其设�
 | Secret | `FILEHOP_ANDROID_KEY_ALIAS` | 正式签名条目别名 |
 | Secret | `FILEHOP_ANDROID_KEY_PASSWORD` | 签名条目密码 |
 | Variable | `FILEHOP_ANDROID_CERT_SHA256` | 预先确认的签名证书 SHA-256，64 位小写十六进制，无冒号 |
-| Variable | `FILEHOP_ANDROID_DEFAULT_ORIGIN` | 正式 HTTPS 域名根地址；会成为 APK 的默认配置，属于发布内容 |
 | Variable | `FILEHOP_PUBLICATION_APPROVED_SHA` | 复用服务器发布的逐提交公开检查批准 |
 
 签名密钥由操作者在可信环境创建并保留独立加密副本，不能只存在 GitHub Secrets。不要把 keystore、密码、真实内容或本机路径放进 PR、日志或仓库。证书可被 APK 使用者读取，创建时使用通用应用主体，不写入私人身份。工作流只在签名步骤注入秘密，临时 keystore 使用限制权限并在退出时删除；签名证书指纹不匹配时拒绝上传，不能用新密钥静默替换正式签名。

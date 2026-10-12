@@ -15,9 +15,6 @@ android {
         targetSdk = 36
         versionCode = providers.gradleProperty("filehopVersionCode").orElse("1").get().toInt()
         versionName = providers.gradleProperty("filehopVersionName").orElse("0.1.0").get()
-        val origin = providers.gradleProperty("filehopDefaultOrigin").orElse("https://filehop.example.invalid").get()
-        require(origin.matches(Regex("https://[A-Za-z0-9.-]+(:[0-9]+)?/?")))
-        buildConfigField("String", "DEFAULT_ORIGIN", "\"$origin\"")
     }
     signingConfigs {
         create("release") {
@@ -37,7 +34,7 @@ android {
             isMinifyEnabled = false
         }
     }
-    buildFeatures { compose = true; buildConfig = true }
+    buildFeatures { compose = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

@@ -106,12 +106,13 @@ private fun FileHop(vm: HopViewModel = viewModel()) {
 
 @Composable
 private fun Configure(vm: HopViewModel) {
-    var origin by remember { mutableStateOf(BuildConfig.DEFAULT_ORIGIN) }
+    var origin by remember { mutableStateOf("") }
     var confirm by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text(stringResource(R.string.configure_title), style = MaterialTheme.typography.headlineSmall)
         OutlinedTextField(origin, { origin = it }, modifier = Modifier.fillMaxWidth(),
-            label = { Text(stringResource(R.string.server_address_label)) }, singleLine = true,
+            label = { Text(stringResource(R.string.server_address_label)) },
+            placeholder = { Text(stringResource(R.string.server_address_example)) }, singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
         Text(stringResource(R.string.server_address_hint), style = MaterialTheme.typography.bodyMedium)
         Button(onClick = { confirm = true }, enabled = TextRules.origin(origin) != null) { Text(stringResource(R.string.action_continue)) }
