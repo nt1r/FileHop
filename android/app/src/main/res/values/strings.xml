@@ -101,7 +101,10 @@
     <string name="notice_send_rejected">发送被拒绝，请检查正文和来源标签</string>
     <string name="notice_send_abandoned">原消息可能已保存；再次发送可能重复</string>
     <string name="upload_choose">选择文件发送</string>
-    <string name="upload_waiting">等待返回前台发送</string>
+    <string name="upload_waiting">等待发送</string>
+    <string name="upload_waiting_count">等待发送：%1$d 项</string>
+    <string name="upload_remove_waiting">移除</string>
+    <string name="upload_selected_file">所选文件</string>
     <string name="upload_checking_limits">检查上传限制…</string>
     <string name="upload_staging">读取所选文件…</string>
     <string name="upload_preparing">准备上传…</string>
@@ -118,7 +121,7 @@
     <string name="upload_interrupted_before_send">已中断本机文件读取，尚未开始发送；再发请重新选择。</string>
     <string name="upload_end_round">结束本轮</string>
     <string name="upload_end_title">结束本轮上传？</string>
-    <string name="upload_end_warning">结束本轮只清空本机上传上下文，不撤回服务器任务。文件可能已经或随后保存；重新选择前请检查历史，重选可能重复。</string>
+    <string name="upload_end_warning">结束本轮会中断本机上传并清空全部等待文件和上传上下文，不影响独立下载，也不撤回服务器任务。文件可能已经或随后保存；重新选择前请检查历史，重选可能重复。</string>
     <string name="upload_picker_failed">无法打开文件选择器，请重试。</string>
     <string name="upload_source_failed">无法读取所选文件，请检查文件是否可用并重新选择。</string>
     <string name="upload_metadata_invalid">文件名称或类型不符合服务器要求，请调整后重新选择。</string>

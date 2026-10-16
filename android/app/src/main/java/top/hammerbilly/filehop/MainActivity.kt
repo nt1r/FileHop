@@ -52,7 +52,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun FileHop(vm: HopViewModel = viewModel()) {
     val screen = vm.screen
-    val chooseUpload = rememberUploadPicker(vm.upload, vm::chooseUpload)
+    val chooseUpload = rememberUploadPicker(vm::chooseUpload, vm::uploadSelection, vm::uploadPickerFailed)
     // Registered outside the authenticated subtree so late picker callbacks are cleaned up after logout.
     val saveDocument = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) {
         vm.downloadTarget(it)

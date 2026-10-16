@@ -61,7 +61,19 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
             invalidate(false, R.string.notice_session_expired)
             return false
         }
-        return upload.beginPicker(screen.label)
+        val chosen = upload.beginPicker(screen.label)
+        transferForeground()
+        return chosen
+    }
+    fun uploadSelection(uris: List<Uri>) {
+        if ((session?.localExpiry ?: 0) <= System.currentTimeMillis() && screen.phase == Phase.Ready)
+            invalidate(false, R.string.notice_session_expired)
+        upload.pickerResult(uris)
+        transferForeground()
+    }
+    fun uploadPickerFailed() {
+        upload.pickerFailed()
+        transferForeground()
     }
     fun chooseDownload(message: Message): Boolean {
         val current = session ?: return false
@@ -70,12 +82,21 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
             return false
         }
         if (screen.phase != Phase.Ready || upload.screen.pickerOpen) return false
-        return downloads.choose(message, screen.origin, current.token)
+        val chosen = downloads.choose(message, screen.origin, current.token)
+        transferForeground()
+        return chosen
     }
     fun downloadTarget(target: Uri?, launchFailed: Boolean = false) {
         if ((session?.localExpiry ?: 0) <= System.currentTimeMillis() && screen.phase == Phase.Ready)
             invalidate(false, R.string.notice_session_expired)
         downloads.pickerReturned(target, launchFailed)
+        transferForeground()
+    }
+    private fun transferForeground() {
+        val ready = foreground && screen.phase == Phase.Ready && !upload.screen.pickerOpen && !downloads.screen.pickerOpen
+        // A picker can leave the activity STARTED. No lane starts a new file until it returns.
+        upload.foreground(ready)
+        downloads.foreground(ready)
     }
 
     init {
@@ -195,7 +216,7 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
             invalidate(false, R.string.notice_credentials_save_failed); return
         }
         session = value
-        upload.authenticated(screen.origin, value.token)
+        upload.authenticated(screen.origin, value.token, value.localExpiry)
         cursor = null; before = null; nextRead = 0; retryUntil = 0; backoff = 10
         screen = screen.copy(phase = Phase.Ready, loggingIn = false, messages = emptyList(),
             noticeRes = if (screen.pending == null) null else R.string.notice_previous_send_unconfirmed)
@@ -204,7 +225,8 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
             delay((value.localExpiry - System.currentTimeMillis()).coerceAtLeast(0))
             invalidate(false, R.string.notice_session_expired)
         }
-        if (foreground) { downloads.foreground(true); refresh(); startPolling() }
+        transferForeground()
+        if (foreground) { refresh(); startPolling() }
     }
     fun logout() {
         val client = api
@@ -224,8 +246,7 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
         foreground = visible
         if (visible && screen.phase == Phase.Ready && (session?.localExpiry ?: 0) <= System.currentTimeMillis())
             invalidate(false, R.string.notice_session_expired)
-        upload.foreground(visible)
-        downloads.foreground(visible && screen.phase == Phase.Ready)
+        transferForeground()
         if (!visible) { poll?.cancel(); return }
         if (screen.phase == Phase.Ready) { refresh(); startPolling() }
     }

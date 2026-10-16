@@ -3,6 +3,7 @@ package top.hammerbilly.filehop
 import android.content.Context
 import android.net.Uri
 import android.os.SystemClock
+import android.os.CancellationSignal
 import android.provider.OpenableColumns
 import androidx.annotation.StringRes
 import androidx.compose.runtime.getValue
@@ -11,6 +12,8 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collect
@@ -20,20 +23,26 @@ import java.io.File
 import java.io.IOException
 import java.util.UUID
 
-enum class UploadPhase { Idle, Waiting, Limits, Staging, Preparing, Transferring, Confirming, Querying, Unconfirmed, Success, Failed }
+enum class UploadPhase { Idle, Limits, Staging, Preparing, Transferring, Confirming, Querying, Unconfirmed, Success, Failed }
+data class UploadWaiting(val id: Long, val name: String = "", val size: Long? = null)
+data class UploadResult(val name: String, val size: Long?, val success: Boolean, @StringRes val noticeRes: Int?)
 data class UploadScreen(
     val phase: UploadPhase = UploadPhase.Idle,
     val name: String = "",
     val size: Long = 0,
     val sent: Long = 0,
+    val sizeKnown: Boolean = false,
+    val waiting: List<UploadWaiting> = emptyList(),
+    val completed: List<UploadResult> = emptyList(),
     val pickerOpen: Boolean = false,
     val settling: Boolean = true,
     val cleanupBlocked: Boolean = false,
     @StringRes val noticeRes: Int? = null,
 ) {
-    val active: Boolean get() = phase in setOf(UploadPhase.Waiting, UploadPhase.Limits, UploadPhase.Staging,
+    val active: Boolean get() = phase in setOf(UploadPhase.Limits, UploadPhase.Staging,
         UploadPhase.Preparing, UploadPhase.Transferring, UploadPhase.Confirming, UploadPhase.Querying)
-    val blocksServerChange: Boolean get() = pickerOpen || active || settling || phase == UploadPhase.Unconfirmed
+    val blocksServerChange: Boolean get() = pickerOpen || waiting.isNotEmpty() || active || settling || phase == UploadPhase.Unconfirmed
+    val canChoose: Boolean get() = !pickerOpen && !cleanupBlocked && (!settling || active)
 }
 
 // Owned by the activity ViewModel, never by a composable or a persistent task store.
@@ -44,40 +53,99 @@ class UploadController internal constructor(context: Context, private val scope:
     var screen by mutableStateOf(UploadScreen())
         private set
     private var credentials: Pair<String, String>? = null
-    private var label = ""
+    private var localExpiry = 0L
+    private var pickerLabel = ""
     private var visible = false
     private var epoch = 0L
+    private var batch = 0L
     private var pickerEpoch = 0L
-    private var selected: Uri? = null
+    private var nextItemId = 0L
+    private data class WaitingUpload(val id: Long, val uri: Uri, val label: String, val described: Boolean = false)
+    private val waiting = mutableListOf<WaitingUpload>()
+    private var descriptions: Job? = null
+    private var descriptionSignal: CancellationSignal? = null
+    private var nextStart: Job? = null
     private var identity: UploadIdentity? = null
     private var operation: UploadOperation? = null
     private var retryUntil = 0L
 
     init { retryCleanup() }
 
-    internal fun authenticated(origin: String, token: String) { credentials = origin to token }
-    fun foreground(value: Boolean) { visible = value; if (value) startSelected() }
+    internal fun authenticated(origin: String, token: String, expiresAt: Long) {
+        credentials = origin to token
+        localExpiry = expiresAt
+    }
+    fun foreground(value: Boolean) {
+        visible = value
+        if (value) startNext() else nextStart?.cancel()
+    }
     fun beginPicker(sourceLabel: String): Boolean {
-        if (credentials == null || !visible || screen.blocksServerChange || screen.cleanupBlocked) return false
+        if (credentials == null || !visible || !screen.canChoose) return false
         if (SystemClock.elapsedRealtime() < retryUntil) {
             screen = screen.copy(noticeRes = R.string.upload_request_wait); return false
         }
-        label = sourceLabel
-        pickerEpoch = epoch
-        screen = UploadScreen(pickerOpen = true, settling = false)
+        pickerLabel = sourceLabel
+        pickerEpoch = batch
+        screen = screen.copy(pickerOpen = true)
         return true
     }
-    fun pickerResult(uri: Uri?) {
+    fun pickerResult(uris: List<Uri>) {
         if (!screen.pickerOpen) return // A process restart must not resurrect a selection.
         screen = screen.copy(pickerOpen = false)
-        if (uri == null || pickerEpoch != epoch || credentials == null) return
-        selected = uri
-        screen = screen.copy(phase = UploadPhase.Waiting)
-        startSelected()
+        if (pickerEpoch != batch || credentials == null) return
+        val additions = uris.map { WaitingUpload(++nextItemId, it, pickerLabel) }
+        pickerLabel = ""
+        waiting.addAll(additions)
+        screen = screen.copy(waiting = screen.waiting + additions.map { UploadWaiting(it.id) })
+        describeWaiting()
+        startNext()
     }
     fun pickerFailed() {
-        pickerResult(null)
+        pickerResult(emptyList())
         screen = screen.copy(noticeRes = R.string.upload_picker_failed)
+    }
+    fun removeWaiting(id: Long) {
+        waiting.removeAll { it.id == id }
+        screen = screen.copy(waiting = screen.waiting.filterNot { it.id == id })
+        stopDescriptions()
+        describeWaiting()
+        startNext()
+    }
+    // Metadata only: waiting items never open file bodies, create snapshots, or reserve server space.
+    private fun describeWaiting() {
+        if (descriptions?.isActive == true) return
+        val version = batch
+        descriptions = scope.launch {
+            while (true) {
+                val item = waiting.firstOrNull { !it.described } ?: break
+                val id = item.id
+                val signal = CancellationSignal()
+                descriptionSignal = signal
+                val details = withContext(Dispatchers.IO) {
+                    runCatching {
+                        resolver.query(item.uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null, signal)?.use {
+                            if (it.moveToFirst()) UploadWaiting(id, it.getString(0).orEmpty(),
+                                if (it.isNull(1)) null else it.getLong(1).takeIf { size -> size >= 0 }) else null
+                        }
+                    }.getOrNull()
+                }
+                if (descriptionSignal === signal) descriptionSignal = null
+                if (version != batch) return@launch
+                val index = waiting.indexOfFirst { it.id == id }
+                if (index >= 0) {
+                    waiting[index] = item.copy(described = true)
+                    if (details != null) screen = screen.copy(waiting = screen.waiting.map { if (it.id == id) details else it })
+                    startNext()
+                }
+            }
+        }
+    }
+    private fun stopDescriptions() {
+        descriptions?.cancel()
+        descriptions = null
+        val signal = descriptionSignal
+        descriptionSignal = null
+        if (signal != null) scope.launch(Dispatchers.IO + NonCancellable) { runCatching { signal.cancel() } }
     }
     private fun clean(): Boolean = try {
         if (!directory.exists()) true else directory.listFiles()?.all { it.isFile && it.delete() } == true
@@ -92,6 +160,7 @@ class UploadController internal constructor(context: Context, private val scope:
             if (operation === op) {
                 operation = null
                 screen = screen.copy(settling = false, cleanupBlocked = !cleaned)
+                startNext()
             }
         }
     }
@@ -138,16 +207,30 @@ class UploadController internal constructor(context: Context, private val scope:
         op.checkActive()
         return UploadSnapshot(file, name, mime, count)
     }
-    private fun startSelected() {
-        val uri = selected ?: return
+    private fun startNext() {
+        val item = waiting.firstOrNull() ?: return
         val auth = credentials ?: return
-        if (!visible || operation != null || screen.cleanupBlocked) return
-        selected = null
+        if (!visible || !item.described || operation != null || identity != null || screen.cleanupBlocked) return
+        if (localExpiry <= System.currentTimeMillis()) { expired(); return }
+        val pause = retryUntil - SystemClock.elapsedRealtime()
+        if (pause > 0) {
+            nextStart?.cancel()
+            nextStart = scope.launch { delay(pause); startNext() }
+            return
+        }
+        val completed = if (screen.phase in setOf(UploadPhase.Success, UploadPhase.Failed))
+            screen.completed + UploadResult(screen.name, screen.size.takeIf { screen.sizeKnown },
+                screen.phase == UploadPhase.Success, screen.noticeRes) else screen.completed
+        val details = screen.waiting.first { it.id == item.id }
+        waiting.removeAt(0)
+        val uri = item.uri
         val version = epoch
         val op = UploadOperation()
         operation = op
-        screen = screen.copy(phase = UploadPhase.Limits, settling = true, noticeRes = null)
-        val sourceLabel = label
+        screen = screen.copy(phase = UploadPhase.Limits, name = details.name, size = details.size ?: 0,
+            sizeKnown = details.size != null, sent = 0, settling = true, noticeRes = null,
+            waiting = screen.waiting.drop(1), completed = completed)
+        val sourceLabel = item.label
         scope.launch {
             try {
                 val api = UploadApi(auth.first, auth.second)
@@ -159,7 +242,7 @@ class UploadController internal constructor(context: Context, private val scope:
                 val fixed = UploadIdentity(UUID.randomUUID().toString(), UUID.randomUUID().toString(),
                     staged.name, staged.size, staged.mime, sourceLabel)
                 identity = fixed
-                screen = screen.copy(phase = UploadPhase.Preparing, name = fixed.name, size = fixed.size)
+                screen = screen.copy(phase = UploadPhase.Preparing, name = fixed.name, size = fixed.size, sizeKnown = true)
                 withContext(Dispatchers.IO) { api.prepare(op, fixed) }
                 if (!current(version, op)) return@launch
                 screen = screen.copy(phase = UploadPhase.Transferring)
@@ -225,6 +308,7 @@ class UploadController internal constructor(context: Context, private val scope:
         if (operation === op) {
             operation = null
             screen = screen.copy(settling = false, cleanupBlocked = !cleaned)
+            startNext()
         }
     }
     fun query() {
@@ -261,7 +345,7 @@ class UploadController internal constructor(context: Context, private val scope:
     }
     private fun stopLocal() {
         epoch++
-        selected = null
+        nextStart?.cancel()
         operation?.let { op ->
             op.cancel()
             scope.launch(Dispatchers.IO + NonCancellable) { op.closeSource() }
@@ -273,22 +357,28 @@ class UploadController internal constructor(context: Context, private val scope:
         screen = screen.copy(phase = if (identity == null) UploadPhase.Failed else UploadPhase.Unconfirmed,
             noticeRes = if (identity == null) R.string.upload_interrupted_before_send else R.string.upload_unconfirmed)
     }
+    private fun clearBatch() {
+        batch++
+        waiting.clear()
+        stopDescriptions()
+        pickerLabel = ""
+    }
     fun endRound() {
         stopLocal()
+        clearBatch()
         identity = null
-        label = ""
         screen = UploadScreen(pickerOpen = screen.pickerOpen, settling = operation != null,
             cleanupBlocked = screen.cleanupBlocked)
     }
     internal fun invalidate(explicit: Boolean) {
-        val interrupted = screen.active || identity != null
+        val interrupted = screen.active || identity != null || waiting.isNotEmpty() || screen.pickerOpen
         credentials = null
-        label = ""
         stopLocal()
+        clearBatch()
         if (explicit) identity = null
         val fixed = identity
         screen = UploadScreen(phase = if (fixed == null) UploadPhase.Idle else UploadPhase.Unconfirmed,
-            name = fixed?.name.orEmpty(), size = fixed?.size ?: 0,
+            name = fixed?.name.orEmpty(), size = fixed?.size ?: 0, sizeKnown = fixed != null,
             pickerOpen = screen.pickerOpen, settling = operation != null, cleanupBlocked = screen.cleanupBlocked,
             noticeRes = if (interrupted && !explicit) R.string.upload_auth_interrupted else null)
         retryUntil = 0
