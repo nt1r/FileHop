@@ -2,6 +2,7 @@ package top.hammerbilly.filehop
 
 import android.app.Application
 import android.os.SystemClock
+import android.net.Uri
 import androidx.annotation.StringRes
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +47,29 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
     private var nextRead = 0L
     private var retryUntil = 0L
     private var backoff = 10L
+    private var fileStatusRefreshPending = false
+    val downloads = FileDownloads(application, viewModelScope) {
+        invalidate(false, R.string.notice_session_invalid)
+    }
+
+    fun chooseDownload(message: Message): Boolean {
+        val current = session ?: return false
+        if (current.localExpiry <= System.currentTimeMillis()) {
+            invalidate(false, R.string.notice_session_expired)
+            return false
+        }
+        if (screen.phase != Phase.Ready) return false
+        return downloads.choose(message, screen.origin, current.token)
+    }
+    fun downloadTarget(target: Uri?, launchFailed: Boolean = false) {
+        if ((session?.localExpiry ?: 0) <= System.currentTimeMillis() && screen.phase == Phase.Ready)
+            invalidate(false, R.string.notice_session_expired)
+        downloads.pickerReturned(target, launchFailed)
+    }
+    override fun onCleared() {
+        downloads.invalidate()
+        super.onCleared()
+    }
 
     init {
         val origin = store.origin
@@ -73,6 +97,7 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
         if (valid == null) { feedback(R.string.notice_server_address_invalid); return }
         if (valid == screen.origin && api != null) return
         if (screen.sending) { feedback(R.string.notice_finish_send_before_server_change); return }
+        if (downloads.screen.busy) { feedback(R.string.notice_finish_download_before_server_change); return }
         // Switching is local and must work even when the previous server is offline.
         // In-flight requests keep their captured Api; generation rejects late responses.
         val cleared = invalidate(true, null)
@@ -96,6 +121,8 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
     private fun clearStored(): Boolean = runCatching { store.clear() }.isSuccess
     private fun invalidate(explicit: Boolean, @StringRes notice: Int?): Boolean {
         generation++
+        downloads.invalidate()
+        fileStatusRefreshPending = false
         poll?.cancel(); expiry?.cancel()
         session = null; cursor = null; before = null
         nextRead = 0; retryUntil = 0; backoff = 10
@@ -167,7 +194,7 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
             delay((value.localExpiry - System.currentTimeMillis()).coerceAtLeast(0))
             invalidate(false, R.string.notice_session_expired)
         }
-        if (foreground) { refresh(); startPolling() }
+        if (foreground) { downloads.foreground(true); refresh(); startPolling() }
     }
     fun logout() {
         val client = api
@@ -185,11 +212,12 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun foreground(visible: Boolean) {
         foreground = visible
-        if (!visible) { poll?.cancel(); return }
+        if (!visible) { downloads.foreground(false); poll?.cancel(); return }
         if (screen.phase == Phase.Ready) {
             if ((session?.localExpiry ?: 0) <= System.currentTimeMillis()) invalidate(false, R.string.notice_session_expired)
             else { refresh(); startPolling() }
         }
+        downloads.foreground(screen.phase == Phase.Ready)
     }
     private fun startPolling() {
         poll?.cancel()
@@ -211,16 +239,12 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
         feedback(if (sending) R.string.notice_send_unconfirmed else R.string.notice_read_failed)
     }
     private fun merge(rows: List<Message>) {
-        val all = screen.messages.associateBy { it.id }.toMutableMap()
-        rows.forEach { message ->
-            val old = all[message.id]
-            if (old == null || message.stateVersion >= old.stateVersion) all[message.id] = message
-        }
+        val messages = FileMessageRules.merge(screen.messages, rows)
         val pending = screen.pending
         val confirmed = pending != null && rows.any {
             it.kind == "TEXT" && it.sendId == pending.id && it.text == pending.text && it.label == pending.label
         }
-        screen = screen.copy(messages = all.values.sortedBy { it.id },
+        screen = screen.copy(messages = messages,
             pending = if (confirmed) null else pending,
             sending = if (confirmed) false else screen.sending,
             draft = if (confirmed && screen.draft == pending?.text) "" else screen.draft,
@@ -230,6 +254,7 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
         val client = api ?: return
         val token = session?.token ?: return
         val time = SystemClock.elapsedRealtime()
+        if (manual && !older && screen.phase == Phase.Ready) fileStatusRefreshPending = true
         if (!foreground || screen.phase != Phase.Ready || screen.reading || time < retryUntil ||
             (!manual && time < nextRead) || (older && (!screen.hasOlder || before == null))) return
         val epoch = generation
@@ -262,6 +287,15 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
                         merge(page.messages)
                         if (page.messages.isNotEmpty()) cursor = page.after
                     } while (page.hasMore && foreground)
+                }
+                if (fileStatusRefreshPending && foreground) {
+                    fileStatusRefreshPending = false
+                    val fileIds = screen.messages.filter { it.kind == "FILE" }.map { it.fileId }.distinct()
+                    for (batch in fileIds.chunked(100)) {
+                        val statuses = client.fileStatuses(token, batch)
+                        if (epoch != generation) return@launch
+                        screen = screen.copy(messages = FileMessageRules.correct(screen.messages, statuses))
+                    }
                 }
                 backoff = 10; nextRead = SystemClock.elapsedRealtime() + 10_000
             } catch (e: Exception) {
