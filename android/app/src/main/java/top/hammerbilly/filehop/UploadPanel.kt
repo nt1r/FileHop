@@ -22,10 +22,10 @@ import androidx.compose.ui.unit.dp
 
 // Register above the authenticated screen so logout/rotation cannot orphan a picker callback.
 @Composable
-internal fun rememberUploadPicker(upload: UploadController, label: String): () -> Unit {
+internal fun rememberUploadPicker(upload: UploadController, beginPicker: () -> Boolean): () -> Unit {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument(), upload::pickerResult)
     return {
-        if (upload.beginPicker(label)) {
+        if (beginPicker()) {
             try { picker.launch(arrayOf("*/*")) }
             catch (_: Exception) { upload.pickerFailed() }
         }
@@ -33,7 +33,8 @@ internal fun rememberUploadPicker(upload: UploadController, label: String): () -
 }
 
 @Composable
-internal fun UploadPanel(upload: UploadController, choose: () -> Unit, authenticated: Boolean = true) {
+internal fun UploadPanel(upload: UploadController, choose: () -> Unit, authenticated: Boolean = true,
+    pickerAvailable: Boolean = true) {
     val state = upload.screen
     var ending by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -66,7 +67,7 @@ internal fun UploadPanel(upload: UploadController, choose: () -> Unit, authentic
             TextButton(onClick = upload::retryCleanup, enabled = !state.settling) { Text(stringResource(R.string.upload_retry_cleanup)) }
         } else if (state.settling && !state.active) Text(stringResource(R.string.upload_finishing), style = MaterialTheme.typography.bodySmall)
         Row {
-            if (authenticated) TextButton(onClick = choose, enabled = !state.blocksServerChange && !state.cleanupBlocked) {
+            if (authenticated) TextButton(onClick = choose, enabled = pickerAvailable && !state.blocksServerChange && !state.cleanupBlocked) {
                 Text(stringResource(R.string.upload_choose))
             }
             if (state.active && state.phase != UploadPhase.Querying) TextButton(onClick = upload::interrupt) {

@@ -6,6 +6,8 @@ import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -50,7 +52,17 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun FileHop(vm: HopViewModel = viewModel()) {
     val screen = vm.screen
-    val chooseUpload = rememberUploadPicker(vm.upload, screen.label)
+    val chooseUpload = rememberUploadPicker(vm.upload, vm::chooseUpload)
+    // Registered outside the authenticated subtree so late picker callbacks are cleaned up after logout.
+    val saveDocument = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) {
+        vm.downloadTarget(it)
+    }
+    val download: (Message) -> Unit = { message ->
+        if (vm.chooseDownload(message)) {
+            try { saveDocument.launch(message.fileName) }
+            catch (_: Exception) { vm.downloadTarget(null, launchFailed = true) }
+        }
+    }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle, vm) {
         val observer = LifecycleEventObserver { _, event ->
@@ -78,7 +90,7 @@ private fun FileHop(vm: HopViewModel = viewModel()) {
                 }
             }, actions = {
                 if (screen.origin.isNotEmpty()) {
-                    TextButton(onClick = { changeServer = true }, enabled = !screen.sending && !vm.upload.screen.blocksServerChange) {
+                    TextButton(onClick = { changeServer = true }, enabled = !screen.sending && !vm.upload.screen.blocksServerChange && !vm.downloads.screen.busy) {
                         Text(stringResource(R.string.action_change_server))
                     }
                 }
@@ -98,6 +110,7 @@ private fun FileHop(vm: HopViewModel = viewModel()) {
             }
             if (screen.phase != Phase.Ready && (vm.upload.screen.blocksServerChange || vm.upload.screen.cleanupBlocked))
                 UploadPanel(vm.upload, chooseUpload, authenticated = false)
+            DownloadFeedback(vm.downloads)
             key(screen.origin) {
                 when (screen.phase) {
                     Phase.Configure -> Configure(vm)
@@ -108,7 +121,7 @@ private fun FileHop(vm: HopViewModel = viewModel()) {
                         Button(onClick = vm::restore, enabled = !screen.loggingIn) { Text(stringResource(R.string.action_retry)) }
                         TextButton(onClick = vm::logout) { Text(stringResource(R.string.action_logout_local)) }
                     }
-                    Phase.Ready -> Messages(screen, vm, chooseUpload)
+                    Phase.Ready -> Messages(screen, vm, chooseUpload, download)
                 }
             }
         }
@@ -157,7 +170,7 @@ private fun ChangeServer(screen: Screen, vm: HopViewModel, onDismiss: () -> Unit
                 Text(TextRules.origin(origin).orEmpty())
                 Text(stringResource(R.string.server_change_warning))
             } },
-            confirmButton = { TextButton(onClick = { vm.changeServer(origin); onDismiss() }, enabled = !screen.sending && !vm.upload.screen.blocksServerChange) {
+            confirmButton = { TextButton(onClick = { vm.changeServer(origin); onDismiss() }, enabled = !screen.sending && !vm.upload.screen.blocksServerChange && !vm.downloads.screen.busy) {
                 Text(stringResource(R.string.action_confirm))
             } },
             dismissButton = { TextButton(onClick = { confirm = false }) { Text(stringResource(R.string.action_back)) } })
@@ -197,7 +210,7 @@ private fun Login(screen: Screen, vm: HopViewModel) {
 }
 
 @Composable
-private fun ColumnScope.Messages(screen: Screen, vm: HopViewModel, chooseUpload: () -> Unit) {
+private fun ColumnScope.Messages(screen: Screen, vm: HopViewModel, chooseUpload: () -> Unit, download: (Message) -> Unit) {
     val list = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -226,7 +239,7 @@ private fun ColumnScope.Messages(screen: Screen, vm: HopViewModel, chooseUpload:
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(message.label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                     Text(if (message.kind == "TEXT") message.text else message.fileName, style = MaterialTheme.typography.bodyLarge)
-                    if (message.kind != "TEXT") Text(stringResource(R.string.file_not_supported), style = MaterialTheme.typography.bodySmall)
+                    if (message.kind == "FILE") FileMessageDownload(message, vm.downloads.screen.canStart && !vm.upload.screen.pickerOpen) { download(message) }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text(message.time, style = MaterialTheme.typography.labelSmall)
                         if (message.kind == "TEXT") TextButton(onClick = {
@@ -243,7 +256,7 @@ private fun ColumnScope.Messages(screen: Screen, vm: HopViewModel, chooseUpload:
         if (screen.messages.isEmpty() && !screen.reading) item { Text(stringResource(R.string.messages_empty), style = MaterialTheme.typography.bodyLarge) }
     }
     if (!nearBottom) TextButton(onClick = { scope.launch { if (screen.messages.isNotEmpty()) list.animateScrollToItem(screen.messages.lastIndex) } }) { Text(stringResource(R.string.action_scroll_latest)) }
-    UploadPanel(vm.upload, chooseUpload)
+    UploadPanel(vm.upload, chooseUpload, pickerAvailable = !vm.downloads.screen.pickerOpen)
     var abandon by remember { mutableStateOf(false) }
     if (screen.pending != null) {
         Text(stringResource(if (screen.sending) R.string.send_in_progress else R.string.send_unconfirmed), style = MaterialTheme.typography.labelLarge)
