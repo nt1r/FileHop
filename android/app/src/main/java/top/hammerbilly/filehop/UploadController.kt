@@ -17,6 +17,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
@@ -48,6 +49,11 @@ data class UploadScreen(
 // Owned by the activity ViewModel, never by a composable or a persistent task store.
 class UploadController internal constructor(context: Context, private val scope: CoroutineScope,
     private val expired: () -> Unit, private val received: (Message) -> Unit) {
+    private companion object {
+        // A replacement ViewModel must wait for the old provider worker and its cleanup.
+        val uploadOwnership = Mutex()
+    }
+    private var ownsUpload = false
     private val resolver = context.applicationContext.contentResolver
     private val directory = File(context.cacheDir, "upload-staging")
     var screen by mutableStateOf(UploadScreen())
@@ -147,6 +153,19 @@ class UploadController internal constructor(context: Context, private val scope:
         descriptionSignal = null
         if (signal != null) scope.launch(Dispatchers.IO + NonCancellable) { runCatching { signal.cancel() } }
     }
+    private suspend fun acquireUpload() {
+        if (!ownsUpload) {
+            uploadOwnership.lock(this)
+            ownsUpload = true
+        }
+    }
+    private fun releaseUploadIfIdle() {
+        // Keep the process-wide lane reserved while an unknown result awaits manual resolution.
+        if (ownsUpload && operation == null && identity == null) {
+            ownsUpload = false
+            uploadOwnership.unlock(this)
+        }
+    }
     private fun clean(): Boolean = try {
         if (!directory.exists()) true else directory.listFiles()?.all { it.isFile && it.delete() } == true
     } catch (_: Exception) { false }
@@ -156,12 +175,8 @@ class UploadController internal constructor(context: Context, private val scope:
         val op = UploadOperation()
         operation = op
         scope.launch {
-            val cleaned = withContext(Dispatchers.IO + NonCancellable) { clean() }
-            if (operation === op) {
-                operation = null
-                screen = screen.copy(settling = false, cleanupBlocked = !cleaned)
-                startNext()
-            }
+            try { acquireUpload() }
+            finally { finish(op) }
         }
     }
     private class LocalFailure(@StringRes val resource: Int) : IOException()
@@ -233,6 +248,10 @@ class UploadController internal constructor(context: Context, private val scope:
         val sourceLabel = item.label
         scope.launch {
             try {
+                acquireUpload()
+                op.checkActive()
+                // A previous controller may have left a failed cleanup before releasing its lane.
+                if (!withContext(Dispatchers.IO) { clean() }) throw LocalFailure(R.string.upload_cleanup_failed)
                 val api = UploadApi(auth.first, auth.second)
                 val limits = withContext(Dispatchers.IO) { api.limits(op) }
                 if (!current(version, op)) return@launch
@@ -303,11 +322,15 @@ class UploadController internal constructor(context: Context, private val scope:
             })
         if (!unknown) identity = null
     }
-    private suspend fun finish(op: UploadOperation) {
-        val cleaned = withContext(Dispatchers.IO + NonCancellable) { op.closeSource(); clean() }
+    private suspend fun finish(op: UploadOperation) = withContext(NonCancellable) {
+        // Include release in the non-cancellable region, not just the blocking cleanup.
+        // A worker cancelled while waiting for ownership must never sweep another owner's files.
+        val cleaned = if (ownsUpload) withContext(Dispatchers.IO) { op.closeSource(); clean() }
+            else !screen.cleanupBlocked
         if (operation === op) {
             operation = null
             screen = screen.copy(settling = false, cleanupBlocked = !cleaned)
+            releaseUploadIfIdle()
             startNext()
         }
     }
@@ -324,6 +347,8 @@ class UploadController internal constructor(context: Context, private val scope:
         screen = screen.copy(phase = UploadPhase.Querying, settling = true, noticeRes = null)
         scope.launch {
             try {
+                acquireUpload()
+                op.checkActive()
                 val result = withContext(Dispatchers.IO) { UploadApi(auth.first, auth.second).result(op, fixed) }
                 if (!current(version, op)) return@launch
                 require(result.getString("send_id") == fixed.sendId)
@@ -369,6 +394,7 @@ class UploadController internal constructor(context: Context, private val scope:
         identity = null
         screen = UploadScreen(pickerOpen = screen.pickerOpen, settling = operation != null,
             cleanupBlocked = screen.cleanupBlocked)
+        releaseUploadIfIdle()
     }
     internal fun invalidate(explicit: Boolean) {
         val interrupted = screen.active || identity != null || waiting.isNotEmpty() || screen.pickerOpen
@@ -382,5 +408,6 @@ class UploadController internal constructor(context: Context, private val scope:
             pickerOpen = screen.pickerOpen, settling = operation != null, cleanupBlocked = screen.cleanupBlocked,
             noticeRes = if (interrupted && !explicit) R.string.upload_auth_interrupted else null)
         retryUntil = 0
+        releaseUploadIfIdle()
     }
 }
