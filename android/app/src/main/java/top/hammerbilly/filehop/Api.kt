@@ -58,7 +58,7 @@ class Api(private val origin: String) {
         return session(request("GET", "/api/native/session", token), token, startedAt)
     }
     suspend fun logout(token: String) { request("DELETE", "/api/native/session", token) }
-    private fun message(json: JSONObject) = Message(json.getString("id").toLong(), json.getString("send_id"),
+    internal fun message(json: JSONObject) = Message(json.getString("id").toLong(), json.getString("send_id"),
         json.getString("kind"), json.optString("text"), json.getString("source_label"), json.getString("created_at"),
         json.optString("file_name"), json.optString("file_state"), json.optString("state_version", "0").toLong())
     suspend fun page(token: String, before: Long? = null, after: Long? = null): Page {

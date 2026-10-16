@@ -46,6 +46,9 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
     private var nextRead = 0L
     private var retryUntil = 0L
     private var backoff = 10L
+    val upload = UploadController(application, viewModelScope,
+        expired = { invalidate(false, R.string.notice_session_invalid) },
+        received = { merge(listOf(it)) })
 
     init {
         val origin = store.origin
@@ -73,6 +76,7 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
         if (valid == null) { feedback(R.string.notice_server_address_invalid); return }
         if (valid == screen.origin && api != null) return
         if (screen.sending) { feedback(R.string.notice_finish_send_before_server_change); return }
+        if (upload.screen.blocksServerChange) { feedback(R.string.upload_finish_before_server_change); return }
         // Switching is local and must work even when the previous server is offline.
         // In-flight requests keep their captured Api; generation rejects late responses.
         val cleared = invalidate(true, null)
@@ -96,6 +100,7 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
     private fun clearStored(): Boolean = runCatching { store.clear() }.isSuccess
     private fun invalidate(explicit: Boolean, @StringRes notice: Int?): Boolean {
         generation++
+        upload.invalidate(explicit)
         poll?.cancel(); expiry?.cancel()
         session = null; cursor = null; before = null
         nextRead = 0; retryUntil = 0; backoff = 10
@@ -159,6 +164,7 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
             invalidate(false, R.string.notice_credentials_save_failed); return
         }
         session = value
+        upload.authenticated(screen.origin, value.token)
         cursor = null; before = null; nextRead = 0; retryUntil = 0; backoff = 10
         screen = screen.copy(phase = Phase.Ready, loggingIn = false, messages = emptyList(),
             noticeRes = if (screen.pending == null) null else R.string.notice_previous_send_unconfirmed)
@@ -185,11 +191,11 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun foreground(visible: Boolean) {
         foreground = visible
+        if (visible && screen.phase == Phase.Ready && (session?.localExpiry ?: 0) <= System.currentTimeMillis())
+            invalidate(false, R.string.notice_session_expired)
+        upload.foreground(visible)
         if (!visible) { poll?.cancel(); return }
-        if (screen.phase == Phase.Ready) {
-            if ((session?.localExpiry ?: 0) <= System.currentTimeMillis()) invalidate(false, R.string.notice_session_expired)
-            else { refresh(); startPolling() }
-        }
+        if (screen.phase == Phase.Ready) { refresh(); startPolling() }
     }
     private fun startPolling() {
         poll?.cancel()
@@ -308,6 +314,10 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
                 if (epoch == generation && screen.pending == attempt) screen = screen.copy(sending = false)
             }
         }
+    }
+    override fun onCleared() {
+        upload.invalidate(true)
+        super.onCleared()
     }
     fun abandon() {
         if (screen.sending) return
