@@ -1,9 +1,12 @@
 package top.hammerbilly.filehop
 
+import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
+import android.webkit.MimeTypeMap
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -35,6 +38,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -54,13 +58,21 @@ private fun FileHop(vm: HopViewModel = viewModel()) {
     val screen = vm.screen
     val chooseUpload = rememberUploadPicker(vm::chooseUpload, vm::uploadSelection, vm::uploadPickerFailed)
     // Registered outside the authenticated subtree so late picker callbacks are cleaned up after logout.
-    val saveDocument = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) {
-        vm.downloadTarget(it)
+    val saveDocument = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        vm.downloadTarget(if (result.resultCode == Activity.RESULT_OK) result.data?.data else null)
     }
     val download: (Message) -> Unit = { message ->
         if (vm.chooseDownload(message)) {
-            try { saveDocument.launch(message.fileName) }
-            catch (_: Exception) { vm.downloadTarget(null, launchFailed = true) }
+            try {
+                val extension = message.fileName.substringAfterLast('.', "").lowercase(Locale.ROOT)
+                val mime = FileSaveRules.mimeType(message.fileMime,
+                    MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension))
+                saveDocument.launch(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = mime
+                    putExtra(Intent.EXTRA_TITLE, message.fileName)
+                })
+            } catch (_: Exception) { vm.downloadTarget(null, launchFailed = true) }
         }
     }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
