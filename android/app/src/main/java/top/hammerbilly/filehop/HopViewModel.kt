@@ -2,6 +2,7 @@ package top.hammerbilly.filehop
 
 import android.app.Application
 import android.os.SystemClock
+import android.net.Uri
 import androidx.annotation.StringRes
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +47,57 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
     private var nextRead = 0L
     private var retryUntil = 0L
     private var backoff = 10L
+    val upload = UploadController(application, viewModelScope,
+        expired = { invalidate(false, R.string.notice_session_invalid) },
+        received = { merge(listOf(it)) })
+    private var fileStatusRefreshPending = false
+    val downloads = FileDownloads(application, viewModelScope) {
+        invalidate(false, R.string.notice_session_invalid)
+    }
+
+    fun chooseUpload(): Boolean {
+        if (screen.phase != Phase.Ready || downloads.screen.pickerOpen) return false
+        if ((session?.localExpiry ?: 0) <= System.currentTimeMillis()) {
+            invalidate(false, R.string.notice_session_expired)
+            return false
+        }
+        val chosen = upload.beginPicker(screen.label)
+        transferForeground()
+        return chosen
+    }
+    fun uploadSelection(uris: List<Uri>) {
+        if ((session?.localExpiry ?: 0) <= System.currentTimeMillis() && screen.phase == Phase.Ready)
+            invalidate(false, R.string.notice_session_expired)
+        upload.pickerResult(uris)
+        transferForeground()
+    }
+    fun uploadPickerFailed() {
+        upload.pickerFailed()
+        transferForeground()
+    }
+    fun chooseDownload(message: Message): Boolean {
+        val current = session ?: return false
+        if (current.localExpiry <= System.currentTimeMillis()) {
+            invalidate(false, R.string.notice_session_expired)
+            return false
+        }
+        if (screen.phase != Phase.Ready || upload.screen.pickerOpen) return false
+        val chosen = downloads.choose(message, screen.origin, current.token)
+        transferForeground()
+        return chosen
+    }
+    fun downloadTarget(target: Uri?, launchFailed: Boolean = false) {
+        if ((session?.localExpiry ?: 0) <= System.currentTimeMillis() && screen.phase == Phase.Ready)
+            invalidate(false, R.string.notice_session_expired)
+        downloads.pickerReturned(target, launchFailed)
+        transferForeground()
+    }
+    private fun transferForeground() {
+        val ready = foreground && screen.phase == Phase.Ready && !upload.screen.pickerOpen && !downloads.screen.pickerOpen
+        // A picker can leave the activity STARTED. No lane starts a new file until it returns.
+        upload.foreground(ready)
+        downloads.foreground(ready)
+    }
 
     init {
         val origin = store.origin
@@ -73,6 +125,8 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
         if (valid == null) { feedback(R.string.notice_server_address_invalid); return }
         if (valid == screen.origin && api != null) return
         if (screen.sending) { feedback(R.string.notice_finish_send_before_server_change); return }
+        if (upload.screen.blocksServerChange) { feedback(R.string.upload_finish_before_server_change); return }
+        if (downloads.screen.busy) { feedback(R.string.notice_finish_download_before_server_change); return }
         // Switching is local and must work even when the previous server is offline.
         // In-flight requests keep their captured Api; generation rejects late responses.
         val cleared = invalidate(true, null)
@@ -96,6 +150,9 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
     private fun clearStored(): Boolean = runCatching { store.clear() }.isSuccess
     private fun invalidate(explicit: Boolean, @StringRes notice: Int?): Boolean {
         generation++
+        upload.invalidate(explicit)
+        downloads.invalidate()
+        fileStatusRefreshPending = false
         poll?.cancel(); expiry?.cancel()
         session = null; cursor = null; before = null
         nextRead = 0; retryUntil = 0; backoff = 10
@@ -159,6 +216,7 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
             invalidate(false, R.string.notice_credentials_save_failed); return
         }
         session = value
+        upload.authenticated(screen.origin, value.token, value.localExpiry)
         cursor = null; before = null; nextRead = 0; retryUntil = 0; backoff = 10
         screen = screen.copy(phase = Phase.Ready, loggingIn = false, messages = emptyList(),
             noticeRes = if (screen.pending == null) null else R.string.notice_previous_send_unconfirmed)
@@ -167,6 +225,7 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
             delay((value.localExpiry - System.currentTimeMillis()).coerceAtLeast(0))
             invalidate(false, R.string.notice_session_expired)
         }
+        transferForeground()
         if (foreground) { refresh(); startPolling() }
     }
     fun logout() {
@@ -185,11 +244,11 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun foreground(visible: Boolean) {
         foreground = visible
+        if (visible && screen.phase == Phase.Ready && (session?.localExpiry ?: 0) <= System.currentTimeMillis())
+            invalidate(false, R.string.notice_session_expired)
+        transferForeground()
         if (!visible) { poll?.cancel(); return }
-        if (screen.phase == Phase.Ready) {
-            if ((session?.localExpiry ?: 0) <= System.currentTimeMillis()) invalidate(false, R.string.notice_session_expired)
-            else { refresh(); startPolling() }
-        }
+        if (screen.phase == Phase.Ready) { refresh(); startPolling() }
     }
     private fun startPolling() {
         poll?.cancel()
@@ -211,16 +270,12 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
         feedback(if (sending) R.string.notice_send_unconfirmed else R.string.notice_read_failed)
     }
     private fun merge(rows: List<Message>) {
-        val all = screen.messages.associateBy { it.id }.toMutableMap()
-        rows.forEach { message ->
-            val old = all[message.id]
-            if (old == null || message.stateVersion >= old.stateVersion) all[message.id] = message
-        }
+        val messages = FileMessageRules.merge(screen.messages, rows)
         val pending = screen.pending
         val confirmed = pending != null && rows.any {
             it.kind == "TEXT" && it.sendId == pending.id && it.text == pending.text && it.label == pending.label
         }
-        screen = screen.copy(messages = all.values.sortedBy { it.id },
+        screen = screen.copy(messages = messages,
             pending = if (confirmed) null else pending,
             sending = if (confirmed) false else screen.sending,
             draft = if (confirmed && screen.draft == pending?.text) "" else screen.draft,
@@ -230,6 +285,7 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
         val client = api ?: return
         val token = session?.token ?: return
         val time = SystemClock.elapsedRealtime()
+        if (manual && !older && screen.phase == Phase.Ready) fileStatusRefreshPending = true
         if (!foreground || screen.phase != Phase.Ready || screen.reading || time < retryUntil ||
             (!manual && time < nextRead) || (older && (!screen.hasOlder || before == null))) return
         val epoch = generation
@@ -262,6 +318,15 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
                         merge(page.messages)
                         if (page.messages.isNotEmpty()) cursor = page.after
                     } while (page.hasMore && foreground)
+                }
+                if (fileStatusRefreshPending && foreground) {
+                    fileStatusRefreshPending = false
+                    val fileIds = screen.messages.filter { it.kind == "FILE" }.map { it.fileId }.distinct()
+                    for (batch in fileIds.chunked(100)) {
+                        val statuses = client.fileStatuses(token, batch)
+                        if (epoch != generation) return@launch
+                        screen = screen.copy(messages = FileMessageRules.correct(screen.messages, statuses))
+                    }
                 }
                 backoff = 10; nextRead = SystemClock.elapsedRealtime() + 10_000
             } catch (e: Exception) {
@@ -308,6 +373,11 @@ class HopViewModel(application: Application) : AndroidViewModel(application) {
                 if (epoch == generation && screen.pending == attempt) screen = screen.copy(sending = false)
             }
         }
+    }
+    override fun onCleared() {
+        upload.invalidate(true)
+        downloads.invalidate()
+        super.onCleared()
     }
     fun abandon() {
         if (screen.sending) return

@@ -1,6 +1,6 @@
 # Spec 006：Android 文件交换
 
-状态：范围已确认，待实现；[实施主 Issue #115](https://github.com/nt1r/FileHop/issues/115) 跟踪实现与验证。先完成 Android 文本闭环，阶段状态见[路线图](../roadmap.md#android)。文件发送语义以 [Spec 002](002-desktop-file-transfer.md) 为准。
+状态：已实现，待托管构建检查、独立审阅与真机验证；[实施主 Issue #115](https://github.com/nt1r/FileHop/issues/115) 跟踪实现与验证，不据源码实现宣告交付完成。Android 文本闭环前置已完成，阶段状态见[路线图](../roadmap.md#android)。文件发送语义以 [Spec 002](002-desktop-file-transfer.md) 为准。
 
 关联：[产品基线](../product.md) · [Spec 002](002-desktop-file-transfer.md) · [Spec 003](003-server-file-management.md) · [Spec 005](005-android-text-loop.md)。本文件是本切片唯一权威来源，实施 Issue 只引用范围和验证编号，不重复维护完整需求。
 
@@ -116,6 +116,6 @@
 
 ## 7. Further Notes
 
-- 先完成 Spec 005 文本闭环，再实施文件交换；需求确认和主 Issue 就绪不代表前置验收已完成。
+- Spec 005 文本闭环前置已完成，证据入口见路线图；文件交换仍须按本 Spec 验证，不能复用文本验收宣告文件功能完成。
 - 按本 Spec 的完整功能范围交付，不提前拆远期子票；具体内部组织和进度刷新方式留给实现。
 - Spec 是唯一权威需求；Issue 跟踪实施和简短验证证据，路线图维护阶段状态。文档确认不表示功能已实现、已真机验证或已部署。
