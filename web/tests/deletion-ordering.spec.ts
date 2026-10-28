@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { resolve } from 'node:path'
 import type { FileStatus, Message } from '../src/messages'
+import { pollMessages } from './auto-sync'
 
 // 同一文件共享一次性实例；前置失败时停止后继，不在重启的 worker 中重复初始化。
 test.describe.configure({ mode: 'serial' })
@@ -73,8 +74,7 @@ test('only the files page deletes and completion requires manual refresh', async
   const name = 'manual-delete.txt'
   await upload(page, name)
   // 先推进新增游标，避免常规新增消息读取恰好携带此文件的新状态。
-  await page.getByRole('button', { name: '读取最近消息' }).click()
-  await expect(page.getByRole('button', { name: '读取最近消息' })).toBeEnabled()
+  await pollMessages(page)
   await expect(row(page, name).getByRole('button', { name: '删除服务器文件' })).toHaveCount(0)
   await filesPage(page)
   await expect(page.getByRole('button', { name: '刷新文件列表' })).toBeEnabled()
@@ -148,7 +148,7 @@ test('late history and batch status cannot resurrect a deleted file', async ({ p
     const file = value.messages.find(m => m.kind === 'FILE' && m.file_id === id)
     expect(file?.kind === 'FILE' && file.file_state).toBe('available')
   })
-  await page.getByRole('button', { name: '读取最近消息' }).click()
+  await page.clock.runFor(10000)
   await history.received
   await filesPage(page)
   await expect(row(page, name)).toBeVisible()
@@ -171,7 +171,7 @@ test('late history and batch status cannot resurrect a deleted file', async ({ p
   await messagesPage(page)
   await expectDeleted(page, name)
   await history.release()
-  await expect(page.getByRole('button', { name: '读取最近消息' })).toBeEnabled()
+  await expect(page.getByLabel('消息历史', { exact: true })).toHaveAttribute('aria-busy', 'false')
   await expectDeleted(page, name)
   await filesPage(page)
   await expect(page.getByRole('button', { name: '刷新文件列表' })).toBeEnabled()

@@ -1,9 +1,10 @@
 import { expect, type Page } from '@playwright/test'
+import { visibility } from './auto-sync'
 
 export async function verifySync(page: Page) {
   await page.reload()
-  const refresh = page.getByRole('button', { name: '读取最近消息' })
-  await expect(refresh).toBeEnabled()
+  const history = page.getByLabel('消息历史', { exact: true })
+  await expect(history).toHaveAttribute('aria-busy', 'false')
   const origin = new URL(page.url()).origin
   for (let n = 0; n < 105; n++) {
     expect((await page.request.post('/api/messages', { headers: { origin }, data: {
@@ -24,34 +25,31 @@ export async function verifySync(page: Page) {
     if (++pages === 2) { failedBoundary = route.request().url(); await route.abort() }
     else await route.continue()
   })
-  await refresh.click()
+  await page.clock.runFor(10000)
   await expect(page.getByText('读取失败', { exact: false })).toBeVisible()
   await expect(page.getByRole('article').filter({ has: page.getByText('Sync', { exact: true }) })).toHaveCount(50)
   await page.unroute('**/api/messages?after=*')
   const resumed = page.waitForRequest('**/api/messages?after=*')
-  await refresh.click()
+  await page.clock.runFor(10000)
   expect((await resumed).url()).toBe(failedBoundary)
   await expect(page.getByRole('article').filter({ has: page.getByText('Sync', { exact: true }) })).toHaveCount(105)
   await expect(page.getByRole('article').filter({ hasText: 'local ahead of sync' })).toHaveCount(1)
-  await expect(refresh).toBeEnabled()
+  await expect(history).toHaveAttribute('aria-busy', 'false')
   expect(Math.abs(await offset() - readingY)).toBeLessThan(2)
   await page.getByRole('button', { name: '回到最新', exact: true }).click()
   await expect(page.getByRole('article').last()).toBeInViewport()
   const emptyRequest = page.waitForRequest('**/api/messages?after=*')
-  await refresh.click()
+  await page.clock.runFor(10000)
   const emptyBoundary = (await emptyRequest).url()
-  await expect(refresh).toBeEnabled()
+  await expect(history).toHaveAttribute('aria-busy', 'false')
   const repeated = page.waitForRequest('**/api/messages?after=*')
-  await refresh.click()
+  await page.clock.runFor(10000)
   expect((await repeated).url()).toBe(emptyBoundary)
-  await expect(refresh).toBeEnabled()
+  await expect(history).toHaveAttribute('aria-busy', 'false')
 
   // install 的时钟仍随真实时间前进；先暂停，避免执行断言本身跨过 Retry-After 边界。
   // 后续仅用 runFor 推进时间，消息与分页仍来自真实后端。
-  const visibility = async (state: 'hidden' | 'visible') => page.evaluate(state => {
-    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state })
-    document.dispatchEvent(new Event('visibilitychange'))
-  }, state)
+  const setVisibility = (state: 'hidden' | 'visible') => visibility(page, state)
   let reads = 0
   let fail = true
   await page.route('**/api/messages?after=*', async route => {
@@ -59,29 +57,29 @@ export async function verifySync(page: Page) {
     if (fail) await route.abort()
     else await route.continue()
   })
-  await visibility('hidden')
+  await setVisibility('hidden')
   // 暂停目标略晚于取时，留出自动化往返时间；隐藏状态下不会提前触发轮询。
   await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000))
   await page.clock.runFor(60000)
   expect(reads).toBe(0)
-  await visibility('visible')
+  await setVisibility('visible')
   await expect(page.getByText('读取失败', { exact: false })).toBeVisible()
   expect(reads).toBe(1)
   await page.clock.runFor(8999)
   expect(reads).toBe(1)
   await page.clock.runFor(1001)
   await expect.poll(() => reads).toBe(2)
-  await expect(refresh).toBeEnabled()
+  await expect(history).toHaveAttribute('aria-busy', 'false')
   await page.clock.runFor(17999)
   expect(reads).toBe(2)
   await page.clock.runFor(2001)
   await expect.poll(() => reads).toBe(3)
-  await expect(refresh).toBeEnabled()
+  await expect(history).toHaveAttribute('aria-busy', 'false')
   await page.clock.runFor(35999)
   expect(reads).toBe(3)
   await page.clock.runFor(4001)
   await expect.poll(() => reads).toBe(4)
-  await expect(refresh).toBeEnabled()
+  await expect(history).toHaveAttribute('aria-busy', 'false')
   await page.clock.runFor(53999)
   expect(reads).toBe(4)
   fail = false
@@ -90,20 +88,20 @@ export async function verifySync(page: Page) {
   await expect(page.getByText('读取失败', { exact: false })).toHaveCount(0)
   await page.clock.runFor(10000)
   await expect.poll(() => reads).toBe(6)
-  await expect(refresh).toBeEnabled()
+  await expect(history).toHaveAttribute('aria-busy', 'false')
   await page.unroute('**/api/messages?after=*')
 
-  // Retry-After 同时约束定时、手动和前台恢复，不能靠连续点击绕过。
+  // Retry-After 同时约束定时和前台恢复，不能靠切回前台绕过。
   reads = 0
   await page.route('**/api/messages?after=*', async route => {
     reads++
     await route.fulfill({ status: 429, headers: { 'Retry-After': '30' }, contentType: 'application/json', body: JSON.stringify({ code: 'limited', message: 'wait' }) })
   })
-  await refresh.click()
+  await page.clock.runFor(10000)
   await expect(page.getByText('读取失败', { exact: false })).toBeVisible()
-  await refresh.click()
-  await visibility('hidden')
-  await visibility('visible')
+  await expect(history).toHaveAttribute('aria-busy', 'false')
+  await setVisibility('hidden')
+  await setVisibility('visible')
   await page.clock.runFor(29999)
   expect(reads).toBe(1)
   await page.unroute('**/api/messages?after=*')
@@ -117,10 +115,11 @@ export async function verifySync(page: Page) {
     reads++
     await route.fulfill({ status: 503, headers: { 'Retry-After': deadline }, contentType: 'text/plain', body: 'unavailable' })
   })
-  await refresh.click()
+  await setVisibility('hidden')
+  await setVisibility('visible')
   await expect(page.getByText('读取失败', { exact: false })).toBeVisible()
+  await expect(history).toHaveAttribute('aria-busy', 'false')
   await page.clock.runFor(28000)
-  await refresh.click()
   expect(reads).toBe(1)
   await page.unroute('**/api/messages?after=*')
   await page.clock.runFor(2000)
@@ -143,9 +142,16 @@ export async function verifySync(page: Page) {
       await page.getByRole('button', { name: '放弃确认' }).click()
       await page.getByLabel('正文', { exact: true }).fill('new protected draft')
     }
-    await refresh.click()
+    await page.clock.runFor(10000)
     await expect(page.getByRole('article').filter({ hasText: text })).toHaveCount(1)
     await expect(page.getByLabel('正文', { exact: true })).toHaveValue(abandon ? 'new protected draft' : '')
+    const success = page.getByText('消息发送成功', { exact: true })
+    if (abandon) await expect(success).toBeHidden()
+    else await expect(success).toBeVisible()
+    // 此段使用暂停的时钟，显式推进 Toast 的自动消失期限。
+    await page.mouse.move(0, 0)
+    await page.clock.runFor(2500)
+    await expect(success).toBeHidden()
   }
   await page.getByLabel('正文', { exact: true }).fill('')
 
@@ -163,13 +169,13 @@ export async function verifySync(page: Page) {
       await held
       await route.fulfill({ response })
     })
-    await refresh.click()
+    await page.clock.runFor(10000)
     await received
-    await visibility('hidden')
-    await visibility('visible')
+    await setVisibility('hidden')
+    await setVisibility('visible')
     await page.clock.runFor(10000)
     expect(requests).toBe(1)
-    await expect(refresh).toBeDisabled()
+    await expect(history).toHaveAttribute('aria-busy', 'true')
     if (exit === 'expiry') await page.clock.fastForward(43_200_000)
     else {
       const other = await page.context().newPage()
@@ -187,14 +193,14 @@ export async function verifySync(page: Page) {
     await page.getByLabel('密码', { exact: true }).fill(' synthetic password ')
     await page.getByRole('button', { name: '登录', exact: true }).click()
     await expect(page.getByRole('article')).toHaveCount(50)
-    await expect(refresh).toBeEnabled()
+    await expect(history).toHaveAttribute('aria-busy', 'false')
   }
   reads = 0
   await page.route('**/api/messages?after=*', async route => {
     reads++
     await route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ code: 'session_invalid', message: 'expired' }) })
   })
-  await refresh.click()
+  await page.clock.runFor(10000)
   await expect(page.getByLabel('用户名')).toBeVisible()
   await page.clock.runFor(120000)
   expect(reads).toBe(1)
@@ -203,4 +209,5 @@ export async function verifySync(page: Page) {
   await page.getByLabel('密码', { exact: true }).fill(' synthetic password ')
   await page.getByRole('button', { name: '登录', exact: true }).click()
   await expect(page.getByRole('article')).toHaveCount(50)
+  await page.clock.resume()
 }

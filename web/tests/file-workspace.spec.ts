@@ -79,6 +79,6 @@ test('files workspace supports local search, category filters and upload feedbac
     await page.unrouteAll({ behavior: 'wait' })
   }
   await page.getByRole('link', { name: '消息工作区' }).click()
-  await expect(page.getByRole('heading', { name: '消息流', exact: true })).toBeVisible()
+  await expect(page.getByRole('region', { name: '消息流', exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: '在线', exact: true })).toHaveCount(0)
 })

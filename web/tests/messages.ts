@@ -1,10 +1,12 @@
 import { expect, type Page } from '@playwright/test'
+import { pollMessages } from './auto-sync'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 export async function verifyMessages(page: Page) {
   const context = await page.context().browser()!.newContext({ baseURL: new URL(page.url()).origin, permissions: ['clipboard-read', 'clipboard-write'] })
   const other = await context.newPage()
+  await other.clock.install()
   await other.goto('/')
   await other.getByLabel('用户名').fill('Admin')
   await other.getByLabel('密码', { exact: true }).fill(' synthetic password ')
@@ -18,6 +20,16 @@ export async function verifyMessages(page: Page) {
   await page.getByRole('button', { name: '发送', exact: true }).click()
   await expect(page.getByLabel('正文', { exact: true })).toHaveValue('')
   await expect(page.getByLabel('来源标签')).toHaveValue('Desk')
+  await expect(page.getByRole('heading', { name: '消息流', exact: true })).toHaveCount(0)
+  const success = page.getByText('消息发送成功', { exact: true })
+  await expect(success).toBeVisible()
+  await expect(page.getByRole('region', { name: '消息流' })).not.toContainText('消息发送成功')
+  // 提示出现时仍可继续输入和点击发送，不被通知层遮住。
+  await page.getByLabel('正文', { exact: true }).fill('next draft')
+  await page.getByRole('button', { name: '发送', exact: true }).click({ trial: true })
+  await page.getByLabel('正文', { exact: true }).fill('')
+  await page.clock.runFor(2500)
+  await expect(success).toBeHidden()
   // 通过真实后端准备并上传文件，确认文本工作区在 FILE 混入消息流后仍可读取。
   const origin = new URL(page.url()).origin
   const sendId = crypto.randomUUID()
@@ -32,10 +44,10 @@ export async function verifyMessages(page: Page) {
   })
   expect(uploaded.status()).toBe(200)
   const file = await uploaded.json() as { file_id: string }
-  await other.getByRole('button', { name: '读取最近消息' }).click()
+  await pollMessages(other)
   const attachment = other.getByRole('article').filter({ hasText: 'browser.txt' })
   await expect(attachment.getByRole('link', { name: '下载附件' })).toHaveAttribute('href', `/api/files/${file.file_id}`)
-  await page.getByRole('button', { name: '读取最近消息' }).click()
+  await pollMessages(page)
   await expect(page.getByRole('article').filter({ hasText: 'browser.txt' })).toHaveCount(1)
   const download = await other.request.get(`/api/files/${file.file_id}`)
   expect(download.status()).toBe(200)
@@ -58,15 +70,19 @@ export async function verifyMessages(page: Page) {
   await other.evaluate(() => { navigator.clipboard.writeText = async () => { throw new Error('denied') } })
   await message.getByRole('button', { name: '复制正文' }).click()
   await expect(other.getByText('复制失败，请手动选择正文复制')).toBeVisible()
+  await other.getByText('复制失败，请手动选择正文复制').hover()
+  await other.getByRole('button', { name: '关闭提示', exact: true }).click()
+  await expect(other.getByText('复制失败，请手动选择正文复制')).toBeHidden()
   await other.getByLabel('正文', { exact: true }).fill('reply')
   await other.getByLabel('正文', { exact: true }).press('Enter')
   await expect(other.getByLabel('正文', { exact: true })).toHaveValue('reply\n')
   await other.getByLabel('正文', { exact: true }).press('Control+Enter')
   await expect(other.getByLabel('正文', { exact: true })).toHaveValue('')
-  await page.getByRole('button', { name: '读取最近消息' }).click()
+  await pollMessages(page)
   await expect(page.getByRole('article').filter({ hasText: 'reply' })).toHaveCount(1)
-  await page.getByRole('button', { name: '读取最近消息' }).click()
+  await pollMessages(page)
   await expect(page.getByRole('article').filter({ hasText: '<b>hello</b>' })).toHaveCount(1)
+  await expect(success).toBeHidden()
   await context.close()
 }
 
@@ -113,7 +129,7 @@ export async function verifyMessageSafety(page: Page) {
   await page.getByRole('button', { name: '用户头像' }).click()
   await page.getByLabel('来源标签').fill('Renamed')
   await page.keyboard.press('Escape')
-  await page.getByRole('button', { name: '读取最近消息' }).click()
+  await pollMessages(page)
   await expect(draft).toHaveValue('')
   const original = page.getByRole('article').filter({ hasText: 'composition guarded' })
   await expect(original).toHaveCount(1)

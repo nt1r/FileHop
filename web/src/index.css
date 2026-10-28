@@ -533,44 +533,76 @@ body {
   position: relative;
 }
 
-.chat-window-header {
+.notification-viewport {
+  position: fixed;
+  top: 5rem;
+  right: 2rem;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 340px;
+  max-width: calc(100vw - 4rem);
+}
+
+.notification {
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--color-kumo-line);
+  border-radius: 0.75rem;
+  background: var(--color-kumo-base);
+  box-shadow: 0 4px 20px var(--color-kumo-shadow-drop);
+  transition: opacity 150ms;
+}
+
+.notification[data-variant="success"] {
+  color: var(--text-color-kumo-success);
+}
+
+.notification[data-variant="error"] {
+  color: var(--text-color-kumo-danger);
+}
+
+.notification[data-starting-style],
+.notification[data-ending-style] {
+  opacity: 0;
+}
+
+.notification[data-limited] {
+  display: none;
+}
+
+.notification-content {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0.75rem 1.25rem;
-  background: var(--color-kumo-base);
-  border-bottom: 1px solid var(--color-kumo-hairline);
+  gap: 0.5rem;
+}
+
+.notification-content > svg {
   flex-shrink: 0;
 }
 
-.chat-header-status-group {
+.notification-title {
+  flex: 1;
+  font-size: 0.875rem;
+}
+
+.chat-history {
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
+  position: relative;
+  flex: 1;
+  min-height: 0;
 }
 
-.chat-status-indicator {
+.chat-history-actions {
   display: flex;
-  align-items: center;
-  gap: 0.45rem;
+  justify-content: center;
 }
 
-.chat-status-title {
-  margin: 0;
-  font-size: 1.05rem;
-  font-weight: 700;
-  color: var(--text-color-kumo-strong);
-}
-
-.chat-status-subtitle {
-  color: var(--text-color-kumo-subtle);
-  font-size: 0.775rem;
-}
-
-.chat-header-actions.stream-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
+.chat-latest-action {
+  position: absolute;
+  bottom: 1rem;
+  right: 1.25rem;
 }
 
 .message-notice-group {

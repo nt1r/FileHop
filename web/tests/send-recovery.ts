@@ -1,4 +1,5 @@
 import { expect, type Page } from '@playwright/test'
+import { pollMessages } from './auto-sync'
 
 export async function verifySendRecovery(page: Page) {
   const draft = page.getByLabel('正文', { exact: true })
@@ -29,7 +30,8 @@ export async function verifySendRecovery(page: Page) {
     await page.keyboard.press('Escape')
     await action.click()
     await expect(draft).toHaveValue('')
-    await page.getByRole('button', { name: '读取最近消息' }).click()
+    await expect(page.getByText('消息发送成功', { exact: true })).toBeVisible()
+    await pollMessages(page)
     await expect(page.getByRole('article').filter({ hasText: text })).toHaveCount(1)
     await page.unroute('**/api/messages')
   }
@@ -111,7 +113,7 @@ async function verifyInFlightResult(page: Page) {
   await expect(draft).toHaveAttribute('readonly', '')
   release()
   await page.unrouteAll({ behavior: 'wait' })
-  await page.getByRole('button', { name: '读取最近消息' }).click()
+  await pollMessages(page)
   await expect(draft).toHaveValue('')
   await expect(page.getByRole('article').filter({ hasText: 'not found does not cancel in-flight send' })).toHaveCount(1)
 }
@@ -120,6 +122,9 @@ async function verifyAbandonedRecovery(page: Page) {
   const draft = page.getByLabel('正文', { exact: true })
   // 各轮分别让原重试、结果查询、历史读取在用户放弃后才返回，覆盖三条消息合并入口。
   for (const source of ['retry', 'query', 'history']) {
+    await page.mouse.move(0, 0)
+    await page.clock.runFor(2500)
+    await expect(page.getByText('消息发送成功', { exact: true })).toHaveCount(0)
     const text = `abandoned ${source}`
     let original: { send_id: string } | undefined
     await page.route('**/api/messages', async route => {
@@ -131,6 +136,7 @@ async function verifyAbandonedRecovery(page: Page) {
     await draft.fill(text)
     await page.getByRole('button', { name: '发送', exact: true }).click()
     await expect(page.getByText('结果未确认：', { exact: false })).toBeVisible()
+    await expect(page.getByText('消息发送成功', { exact: true })).toHaveCount(0)
     await page.unroute('**/api/messages')
     let release!: () => void
     let arrived!: () => void
@@ -143,7 +149,8 @@ async function verifyAbandonedRecovery(page: Page) {
       await held
       await route.fulfill({ response })
     })
-    await page.getByRole('button', { name: source === 'query' ? '查询发送结果' : source === 'retry' ? '同次重试' : '读取最近消息' }).click()
+    if (source === 'history') await page.clock.runFor(10000)
+    else await page.getByRole('button', { name: source === 'query' ? '查询发送结果' : '同次重试' }).click()
     await received
     page.once('dialog', async dialog => {
       expect(dialog.message()).toContain('可能已经保存')
@@ -161,6 +168,7 @@ async function verifyAbandonedRecovery(page: Page) {
     await page.unrouteAll({ behavior: 'wait' })
     await expect(page.getByRole('article').filter({ hasText: text })).toHaveCount(1)
     await expect(draft).toHaveValue(`new draft after ${source}`)
+    await expect(page.getByText('消息发送成功', { exact: true })).toHaveCount(0)
     // 主动再次发送相同正文是新操作，不是撤回或偷偷沿用旧标识。
     await draft.fill(text)
     const sent = page.waitForRequest(request => request.method() === 'POST' && request.url().endsWith('/api/messages'))
