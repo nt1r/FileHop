@@ -1,4 +1,5 @@
 import { expect, type Page } from '@playwright/test'
+import { pollMessages } from './auto-sync'
 
 export async function verifyHistory(page: Page) {
   const origin = new URL(page.url()).origin
@@ -16,7 +17,8 @@ export async function verifyHistory(page: Page) {
   await expect(articles.last()).toContainText('paged history 104')
   await expect(older).toBeVisible()
   const anchor = articles.filter({ hasText: 'paged history 60\n' })
-  await anchor.scrollIntoViewIfNeeded()
+  // 历史入口随列表滚动；先滚到入口再记录位置，点击不会额外改变阅读位置。
+  await older.scrollIntoViewIfNeeded()
   // 保持的是列表内阅读位置；发送反馈等外围布局变化允许移动整个列表。
   const anchorOffset = async () => (await anchor.boundingBox())!.y - (await page.getByLabel('消息历史', { exact: true }).boundingBox())!.y
   const y = await anchorOffset()
@@ -35,16 +37,16 @@ export async function verifyHistory(page: Page) {
   await expect(articles).toHaveCount(100)
   expect(Math.abs(await anchorOffset() - y)).toBeLessThan(2)
 
-  // 阅读旧内容时发送和最近页读取不得抢走位置，同一服务器消息合并后只出现一次。
+  // 阅读旧内容时发送和自动增量读取不得抢走位置，同一服务器消息合并后只出现一次。
   await page.getByLabel('正文', { exact: true }).fill('new while reading history')
   await page.getByRole('button', { name: '发送', exact: true }).click()
   await expect(page.getByLabel('正文', { exact: true })).toHaveValue('')
-  await page.getByRole('button', { name: '读取最近消息' }).click()
+  await pollMessages(page)
   await expect(articles.filter({ hasText: 'new while reading history' })).toHaveCount(1)
   expect(Math.abs(await anchorOffset() - y)).toBeLessThan(2)
   await older.click()
   await expect(articles.filter({ hasText: 'paged history 0\n' })).toHaveCount(1)
-  await expect(page.getByRole('button', { name: '读取最近消息' })).toBeEnabled()
+  await expect(page.getByLabel('消息历史', { exact: true })).toHaveAttribute('aria-busy', 'false')
   if (await older.count()) await older.click()
   await expect(older).toHaveCount(0)
   await page.getByRole('button', { name: '回到最新', exact: true }).click()

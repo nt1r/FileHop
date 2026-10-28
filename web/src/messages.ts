@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useKumoToastManager } from '@cloudflare/kumo/components/toast'
 
 export type Message = { id: string; send_id: string; source_label: string; created_at: string } & (
   { kind: 'TEXT'; text: string } |
@@ -16,7 +17,7 @@ export const fileStateLabels = {
 }
 type Attempt = { send_id: string; text: string; source_label: string; state: 'sending' | 'unknown' | 'checking'; uncertain?: boolean }
 type Model = { draft: string; attempt: Attempt | null; messages: Message[]; syncCursor: string | null; before: string | null; hasOlder: boolean; historyNotice: string; notice: string; reading: boolean }
-const unknownNotice = '结果未确认：正文与发送标识已保留，请主动读取历史确认；不会自动重发。'
+const unknownNotice = '结果未确认：正文与发送标识已保留，请等待自动同步或查询发送结果；不会自动重发。'
 const empty = (): Model => ({ draft: '', attempt: null, messages: [], syncCursor: null, before: null, hasOlder: false, historyNotice: '', notice: '', reading: false })
 const space = '\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000'
 export const normalizeLabel = (value: string) => value.replace(new RegExp(`^[${space}]+|[${space}]+$`, 'g'), '')
@@ -70,6 +71,7 @@ async function request(body?: Attempt, path = '/api/messages', fileIds?: string[
 }
 
 export function useMessages(active: boolean, onExpired: () => void) {
+  const toastManager = useKumoToastManager()
   const [model, setModel] = useState<Model>(empty)
   const current = useRef(model)
   const [label, setLabel] = useState(savedLabel)
@@ -94,7 +96,7 @@ export function useMessages(active: boolean, onExpired: () => void) {
   }
   async function refreshFileStates() {
     if (!enabled.current || document.visibilityState !== 'visible') return
-    if (Date.now() < statusRetryAt.current) { setFileStatusNotice('文件状态查询暂受限，请稍后刷新。'); return }
+    if (Date.now() < statusRetryAt.current) { setFileStatusNotice('文件状态查询暂受限，请稍后重新进入消息页。'); return }
     // 下载可能在旧查询途中才发现异常；合并刷新意图，旧查询结束后再取一次，不能漏掉这次发现。
     if (statusReading.current) { statusAgain.current = true; return }
     statusAgain.current = false
@@ -119,7 +121,7 @@ export function useMessages(active: boolean, onExpired: () => void) {
       if (error instanceof ApiError && error.status === 401 && error.code === 'session_invalid') expire.current()
       else {
         if (error instanceof ApiError) statusRetryAt.current = Math.max(statusRetryAt.current, error.retryAt)
-        setFileStatusNotice('文件状态校正失败，请稍后手动刷新。')
+        setFileStatusNotice('文件状态更新失败，请稍后重新进入消息页。')
       }
     } finally {
       if (version === epoch.current) {
@@ -171,7 +173,9 @@ export function useMessages(active: boolean, onExpired: () => void) {
     update({ ...state, messages: [...merged.values()].sort((a, b) => BigInt(a.id) < BigInt(b.id) ? -1 : 1),
       // 只有完整读取成功才建立快照基线，本地发送响应不能挪动新增读取游标。
       syncCursor: cursor ?? state.syncCursor,
-      ...(confirmed ? { draft: '', attempt: null, notice: '发送成功' } : {}) })
+      ...(confirmed ? { draft: '', attempt: null, notice: '' } : {}) })
+    // 只在当前发送尝试被确认时提示；重复轮询或已放弃尝试的迟到结果不重复提示。
+    if (confirmed) toastManager.add({ title: '消息发送成功', variant: 'success', timeout: 2000 })
   }
   async function read(older = false) {
     if (!enabled.current || document.visibilityState !== 'visible' || current.current.reading) return
@@ -228,12 +232,12 @@ export function useMessages(active: boolean, onExpired: () => void) {
       else {
         if (error instanceof ApiError) retryAt.current = Math.max(retryAt.current, error.retryAt)
         if (!older) failures.current++
-        update({ ...current.current, ...(older ? { historyNotice: '加载更早消息失败，请重试' } : { notice: '读取失败，请检查网络或访问层；将退避重试，也可手动刷新' }) })
+        update({ ...current.current, ...(older ? { historyNotice: '加载更早消息失败，请重试' } : { notice: '读取失败，请检查网络；将自动重试' }) })
       }
     } finally {
       if (version === epoch.current) {
         update({ ...current.current, reading: false })
-        // 退避仅针对自动读取，手动/返回前台可提前尝试，但所有入口都必须遵守服务端期限。
+        // 返回前台可提前尝试；自动同步与历史分页都必须遵守服务端期限。
         const delay = failures.current ? Math.min(60000, 10000 * 2 ** Math.min(failures.current - 1, 3)) * (0.9 + Math.random() * 0.1) : 10000
         if (!older) nextPoll.current = Date.now() + delay
         schedule()
@@ -251,7 +255,7 @@ export function useMessages(active: boolean, onExpired: () => void) {
   async function transmit(attempt: Attempt) {
     const version = epoch.current
     // 同步锁定，连续点击也只能发起一次请求；重试始终使用原正文、标签和标识。
-    update({ ...current.current, attempt: { ...attempt, state: 'sending' }, notice: '发送中…' })
+    update({ ...current.current, attempt: { ...attempt, state: 'sending' }, notice: '' })
     try {
       const value = await request(attempt)
       if (version !== epoch.current || !enabled.current) return
@@ -333,9 +337,8 @@ export function useMessages(active: boolean, onExpired: () => void) {
     window.addEventListener('beforeunload', leave)
     return () => window.removeEventListener('beforeunload', leave)
   }, [])
-  return { model, label, setLabel, saveLabel, read, send, retry, query, abandon, suspend,
+  return { model, label, setLabel, saveLabel, loadOlder: () => read(true), send, retry, query, abandon, suspend,
     rememberFiles, projectFile, refreshFileStates, fileStatusNotice,
-    refresh: async () => { await read(); await refreshFileStates() },
     receivedFile: (message: Message) => { if (enabled.current) merge([message]) },
     hasUnsaved: () => Boolean(current.current.draft || current.current.attempt),
     draft: (value: string) => { if (!current.current.attempt) update({ ...current.current, draft: value }) } }

@@ -1,6 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
-  ArrowClockwiseIcon,
   ArrowDownIcon,
   ArrowUpIcon,
   CopyIcon,
@@ -80,51 +79,11 @@ export default function Messages({ exchange, files }: { exchange: ReturnType<typ
 
   return (
     <section className="stream chat-window-panel" aria-label="消息流">
-      <div className="chat-window-header">
-        <div className="chat-header-status-group">
-          <div className="chat-status-indicator">
-            <Text variant="heading" as="h2" DANGEROUS_className="chat-status-title">
-              消息流
-            </Text>
-          </div>
-        </div>
-        <div className="chat-header-actions stream-toolbar">
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={<ArrowUpIcon />}
-            style={{ visibility: model.hasOlder ? 'visible' : 'hidden' }}
-            disabled={model.reading || !model.hasOlder}
-            onClick={() => void exchange.read(true)}
-          >
-            加载更早消息
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={<ArrowDownIcon />}
-            style={{ visibility: atBottom ? 'hidden' : 'visible' }}
-            onClick={scrollToLatest}
-          >
-            回到最新
-          </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            icon={<ArrowClockwiseIcon />}
-            disabled={model.reading}
-            onClick={() => void exchange.refresh()}
-          >
-            读取最近消息
-          </Button>
-        </div>
-      </div>
-
       {Boolean(model.historyNotice || model.notice || downloadNotice || exchange.fileStatusNotice) && (
         <div className="message-notice-group">
           {(model.historyNotice || model.notice) && (
             <div className="message-notice" aria-live="polite">
-              <Text variant={(model.historyNotice || model.notice).includes('成功') ? 'success' : 'error'} size="sm">
+              <Text variant="error" size="sm">
                 {model.historyNotice || model.notice}
               </Text>
             </div>
@@ -134,125 +93,144 @@ export default function Messages({ exchange, files }: { exchange: ReturnType<typ
         </div>
       )}
 
-      <div
-        className="messages chat-messages-stream"
-        ref={list}
-        tabIndex={0}
-        aria-label="消息历史"
-        onScroll={() => {
-          const element = list.current!
-          following.current = element.scrollHeight - element.scrollTop - element.clientHeight < 8
-          setAtBottom(following.current)
-        }}
-      >
-        {model.messages.length === 0 && (
-          <div className="chat-empty-state">
-            <Text variant="secondary">暂无消息。</Text>
-          </div>
-        )}
+      <div className="chat-history">
+        <div
+          className="messages chat-messages-stream"
+          ref={list}
+          tabIndex={0}
+          aria-label="消息历史"
+          aria-busy={model.reading}
+          onScroll={() => {
+            const element = list.current!
+            following.current = element.scrollHeight - element.scrollTop - element.clientHeight < 8
+            setAtBottom(following.current)
+          }}
+        >
+          {model.hasOlder && (
+            <div className="chat-history-actions">
+              <Button variant="ghost" size="sm" icon={<ArrowUpIcon />} disabled={model.reading} onClick={() => void exchange.loadOlder()}>
+                加载更早消息
+              </Button>
+            </div>
+          )}
 
-        {model.messages.length > 0 && (
-          <div className="chat-date-pill-container">
-            <span className="chat-date-pill">
-              {formatMessageDate(model.messages[0].created_at)}
-            </span>
-          </div>
-        )}
+          {model.messages.length === 0 && (
+            <div className="chat-empty-state">
+              <Text variant="secondary">暂无消息。</Text>
+            </div>
+          )}
 
-        {model.messages.map(message => {
-          const isSelf = message.source_label === label
+          {model.messages.length > 0 && (
+            <div className="chat-date-pill-container">
+              <span className="chat-date-pill">
+                {formatMessageDate(model.messages[0].created_at)}
+              </span>
+            </div>
+          )}
 
-          return (
-            <article
-              key={message.id}
-              data-message-id={message.id}
-              data-source-color={getSourceColor(message.source_label)}
-              className={`message chat-message-row ${isSelf ? 'chat-row-self' : 'chat-row-other'}`}
-            >
-              {!isSelf && (
-                <div className="chat-message-avatar">
-                  <UserAvatar label={message.source_label} size={36} />
-                </div>
-              )}
+          {model.messages.map(message => {
+            const isSelf = message.source_label === label
 
-              <div className="chat-bubble-container">
+            return (
+              <article
+                key={message.id}
+                data-message-id={message.id}
+                data-source-color={getSourceColor(message.source_label)}
+                className={`message chat-message-row ${isSelf ? 'chat-row-self' : 'chat-row-other'}`}
+              >
                 {!isSelf && (
-                  <header className="chat-bubble-header">
-                    <div className="chat-device-tag">
-                      <DesktopIcon size={12} className="chat-device-icon" />
-                      <span className="message-source-label">{message.source_label}</span>
-                    </div>
-                  </header>
+                  <div className="chat-message-avatar">
+                    <UserAvatar label={message.source_label} size={36} />
+                  </div>
                 )}
 
-                <div
-                  className={`chat-bubble-body ${isSelf ? 'bubble-self' : 'bubble-other'} ${message.kind === 'FILE' ? 'bubble-file-card' : ''}`}
-                >
-                  {message.kind === 'TEXT' ? (
-                    <div className="message-body text-message">
-                      <pre className="message-text-content">{message.text}</pre>
-                    </div>
-                  ) : (
-                    <div className="message-body file-message">
-                      <div className="file-message-card">
-                        <FileTypeBadge filename={message.file_name} size="md" />
-                        <div className="file-message-details">
-                          <Text DANGEROUS_className="file-message-meta">
-                            {message.file_name}
-                          </Text>
-                          <Text variant="secondary" size="xs" DANGEROUS_className="file-message-size">
-                            {formatBytes(message.file_size)}
-                          </Text>
-                          <div className="file-message-status-row">
-                            <Badge variant={message.file_state === 'available' ? 'success' : message.file_state === 'deleted' ? 'secondary' : 'warning'}>
-                              {fileStateLabels[message.file_state]}
-                            </Badge>
-                            {message.file_state === 'available' && (
-                              <a
-                                href={`/api/files/${encodeURIComponent(message.file_id)}`}
-                                download
-                                className="file-download-link"
-                                onClick={event => { event.preventDefault(); void download(message.file_id) }}
-                              >
-                                <DownloadSimpleIcon size={14} />
-                                <span>下载附件</span>
-                              </a>
-                            )}
+                <div className="chat-bubble-container">
+                  {!isSelf && (
+                    <header className="chat-bubble-header">
+                      <div className="chat-device-tag">
+                        <DesktopIcon size={12} className="chat-device-icon" />
+                        <span className="message-source-label">{message.source_label}</span>
+                      </div>
+                    </header>
+                  )}
+
+                  <div
+                    className={`chat-bubble-body ${isSelf ? 'bubble-self' : 'bubble-other'} ${message.kind === 'FILE' ? 'bubble-file-card' : ''}`}
+                  >
+                    {message.kind === 'TEXT' ? (
+                      <div className="message-body text-message">
+                        <pre className="message-text-content">{message.text}</pre>
+                      </div>
+                    ) : (
+                      <div className="message-body file-message">
+                        <div className="file-message-card">
+                          <FileTypeBadge filename={message.file_name} size="md" />
+                          <div className="file-message-details">
+                            <Text DANGEROUS_className="file-message-meta">
+                              {message.file_name}
+                            </Text>
+                            <Text variant="secondary" size="xs" DANGEROUS_className="file-message-size">
+                              {formatBytes(message.file_size)}
+                            </Text>
+                            <div className="file-message-status-row">
+                              <Badge variant={message.file_state === 'available' ? 'success' : message.file_state === 'deleted' ? 'secondary' : 'warning'}>
+                                {fileStateLabels[message.file_state]}
+                              </Badge>
+                              {message.file_state === 'available' && (
+                                <a
+                                  href={`/api/files/${encodeURIComponent(message.file_id)}`}
+                                  download
+                                  className="file-download-link"
+                                  onClick={event => { event.preventDefault(); void download(message.file_id) }}
+                                >
+                                  <DownloadSimpleIcon size={14} />
+                                  <span>下载附件</span>
+                                </a>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
+
+                  <footer className="chat-bubble-footer">
+                    <Text variant="secondary" size="xs" as="time" {...{ dateTime: message.created_at }}>
+                      {formatMessageTime(message.created_at)}
+                    </Text>
+                    {message.kind === 'TEXT' && (
+                      <div className="message-actions">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="btn-copy-bubble"
+                          icon={<CopyIcon size={13} />}
+                          onClick={() => void copy(message.text)}
+                        >
+                          复制正文
+                        </Button>
+                      </div>
+                    )}
+                  </footer>
                 </div>
 
-                <footer className="chat-bubble-footer">
-                  <Text variant="secondary" size="xs" as="time" {...{ dateTime: message.created_at }}>
-                    {formatMessageTime(message.created_at)}
-                  </Text>
-                  {message.kind === 'TEXT' && (
-                    <div className="message-actions">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="btn-copy-bubble"
-                        icon={<CopyIcon size={13} />}
-                        onClick={() => void copy(message.text)}
-                      >
-                        复制正文
-                      </Button>
-                    </div>
-                  )}
-                </footer>
-              </div>
+                {isSelf && (
+                  <div className="chat-message-avatar">
+                    <UserAvatar label={message.source_label} size={36} />
+                  </div>
+                )}
+              </article>
+            )
+          })}
+        </div>
 
-              {isSelf && (
-                <div className="chat-message-avatar">
-                  <UserAvatar label={message.source_label} size={36} />
-                </div>
-              )}
-            </article>
-          )
-        })}
+        {!atBottom && (
+          <div className="chat-latest-action">
+            <Button variant="secondary" size="sm" icon={<ArrowDownIcon />} onClick={scrollToLatest}>
+              回到最新
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Dock Area: Upload Tasks, Warnings, and Send Recovery */}
@@ -353,6 +331,7 @@ export default function Messages({ exchange, files }: { exchange: ReturnType<typ
                 size="sm"
                 icon={<PaperPlaneTiltIcon size={15} weight="fill" />}
                 className="composer-send-button"
+                loading={model.attempt?.state === 'sending'}
                 disabled={Boolean(model.attempt) || !validText(model.draft) || !validLabel(label)}
                 onClick={() => void exchange.send()}
               >

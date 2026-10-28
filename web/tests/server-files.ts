@@ -2,6 +2,7 @@ import { expect, type Page } from '@playwright/test'
 import { unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { formatBytes } from '../src/format'
+import { visibility } from './auto-sync'
 
 export async function verifyServerFiles(page: Page) {
   const names = ['navigation-a.txt', 'navigation-b.txt', 'navigation-c.txt', 'navigation-wait.txt']
@@ -127,18 +128,13 @@ export async function verifyServerFiles(page: Page) {
   await page.getByLabel('正文', { exact: true }).fill('')
   await page.unrouteAll({ behavior: 'wait' })
 
-  // 已加载的旧文件不一定出现在新增轮询里；手动刷新须单独校正而不丢消息顺序。
-  const visibility = async (state: 'hidden' | 'visible') => page.evaluate(state => {
-    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state })
-    document.dispatchEvent(new Event('visibilitychange'))
-  }, state)
-  await visibility('hidden')
+  // 已加载的旧文件不一定出现在新增轮询里；回到前台自动校正且不丢消息顺序。
+  await visibility(page, 'hidden')
   let hiddenQueries = 0
   await page.route('**/api/files/status-query', async route => { hiddenQueries++; await route.continue() })
-  await page.getByRole('button', { name: '读取最近消息' }).click()
   await page.clock.runFor(30000)
   expect(hiddenQueries).toBe(0)
-  await visibility('visible')
+  await visibility(page, 'visible')
   await expect.poll(() => hiddenQueries).toBeGreaterThan(0)
   await page.unroute('**/api/files/status-query')
   const otherRow = page.getByRole('article').filter({ hasText: names[1] })
@@ -147,7 +143,8 @@ export async function verifyServerFiles(page: Page) {
   unlinkSync(join(process.env.TEST_FILES!, otherId))
   await page.request.get(`/api/files/${otherId}`)
   await page.getByLabel('正文', { exact: true }).fill('status correction draft')
-  await page.getByRole('button', { name: '读取最近消息' }).click()
+  await visibility(page, 'hidden')
+  await visibility(page, 'visible')
   await expect(otherRow).toContainText('存储异常')
   expect(await page.locator('[data-message-id]').evaluateAll(nodes => nodes.map(n => n.getAttribute('data-message-id')))).toEqual(order)
   await expect(page.getByLabel('正文', { exact: true })).toHaveValue('status correction draft')
@@ -164,7 +161,8 @@ export async function verifyServerFiles(page: Page) {
     await heldStatus
     await route.fulfill({ response })
   }, { times: 1 })
-  await page.getByRole('button', { name: '读取最近消息' }).click()
+  await visibility(page, 'hidden')
+  await visibility(page, 'visible')
   await gotStatus
   // 真实读取响应延迟到退出并重新登录后，不能恢复旧认证周期的文件列表。
   let release!: () => void
