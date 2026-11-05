@@ -1,6 +1,9 @@
 # 与 compose.dev.yml 合并；宿主入口通过专用网络固定地址连接，不发布应用端口。
 services:
   backend:
+    environment:
+      FILEHOP_MAX_FILE_BYTES: "3000000000"
+      FILEHOP_FILE_QUOTA_BYTES: "10000000000"
     networks:
       ingress:
         ipv4_address: ${FILEHOP_BACKEND_IP:?Set the dedicated backend IP}
